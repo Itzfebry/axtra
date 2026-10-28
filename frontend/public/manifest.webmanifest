@@ -1,0 +1,24 @@
+{
+  "name": "Axtra — Personal AI Agent",
+  "short_name": "Axtra",
+  "description": "Agen AI personal yang memahami konteks, memori, dan tujuanmu.",
+  "start_url": "/chat",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "lang": "id",
+  "icons": [
+    {
+      "src": "/axtratr.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/axtratr.png",
+      "sizes": "1254x1254",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
