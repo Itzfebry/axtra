@@ -104,3 +104,38 @@ PESAN PENGGUNA:
 KONTEKS PERCAKAPAN TERAKHIR (ringkas, bisa kosong):
 {recent_context}
 """
+
+MEMORY_MERGE_PROMPT = """\
+Gabungkan beberapa catatan memori pengguna yang bertopik sama menjadi SATU \
+ringkasan padat dan jelas.
+
+Aturan:
+- Pertahankan semua fakta penting; buang pengulangan dan kontradiksi yang basi.
+- Tulis satu paragraf ringkas berbahasa Indonesia, tanpa bullet atau heading.
+- Pilih satu kategori paling tepat dari: identity, episodic, semantic, project, \
+goal, skill, conversation.
+
+Jawab HANYA JSON objek berupa:
+{{"type": "<kategori>", "summary": "<ringkasan satu paragraf>"}}
+
+CATATAN MEMORI:
+---
+{memories}
+---
+"""
+
+MEMORY_GROUPING_PROMPT = """\
+Kelompokkan catatan memori pengguna berikut berdasarkan TOPIK yang sama. \
+Gabungkan hanya catatan yang benar-benar membahas topik, orang, proyek, atau \
+tujuan yang sama. Catatan yang berdiri sendiri tidak perlu dimasukkan.
+
+Jawab HANYA JSON array dari array indeks (indeks mengacu ke NOMOR catatan):
+[[1, 4, 7], [2, 5]]
+
+Jika tidak ada topik yang sama, kembalikan [].
+
+CATATAN MEMORI:
+---
+{memories}
+---
+"""

@@ -36,6 +36,69 @@ def _vector_literal(vector: list[float]) -> str:
     return "[" + ",".join(f"{value:.6f}" for value in vector) + "]"
 
 
+def _parse_vector(raw: Any) -> list[float]:
+    """Parse a pgvector value (str like "[..]" or list) into floats."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        parts = [part for part in text.replace(" ", "").split(",") if part]
+        try:
+            return [float(part) for part in parts]
+        except ValueError:
+            return []
+    if isinstance(raw, (list, tuple)):
+        try:
+            return [float(value) for value in raw]
+        except (TypeError, ValueError):
+            return []
+    return []
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    dot = sum(x * y for x, y in zip(a, b))
+    norm_a = sum(x * x for x in a) ** 0.5
+    norm_b = sum(y * y for y in b) ** 0.5
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+def cluster_by_similarity(
+    vectors: dict[str, list[float]],
+    threshold: float,
+    min_size: int = 2,
+) -> list[list[str]]:
+    """Greedy single-link clustering of ids by cosine similarity."""
+    ids = list(vectors)
+    parent: dict[str, str] = {memory_id: memory_id for memory_id in ids}
+
+    def find(item: str) -> str:
+        while parent[item] != item:
+            parent[item] = parent[parent[item]]
+            item = parent[item]
+        return item
+
+    def union(left: str, right: str) -> None:
+        root_left, root_right = find(left), find(right)
+        if root_left != root_right:
+            parent[root_right] = root_left
+
+    for index, left in enumerate(ids):
+        for right in ids[index + 1 :]:
+            if _cosine(vectors[left], vectors[right]) >= threshold:
+                union(left, right)
+
+    groups: dict[str, list[str]] = {}
+    for memory_id in ids:
+        groups.setdefault(find(memory_id), []).append(memory_id)
+    return [group for group in groups.values() if len(group) >= min_size]
+
+
 class MemoryService:
     def __init__(
         self,
@@ -172,6 +235,25 @@ class MemoryService:
             .execute()
         )
         return int(response.count or 0)
+
+    @property
+    def embeddings_available(self) -> bool:
+        return self._embeddings.available
+
+    async def fetch_embeddings(self, user_id: str) -> dict[str, list[float]]:
+        """Return ``{memory_id: vector}`` for the user's stored embeddings."""
+        response = (
+            await self._client.table("memory_embeddings")
+            .select("memory_id, embedding")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        vectors: dict[str, list[float]] = {}
+        for row in response.data or []:
+            vector = _parse_vector(row.get("embedding"))
+            if vector:
+                vectors[row["memory_id"]] = vector
+        return vectors
 
     async def exists_active(self, user_id: str, content: str) -> bool:
         response = (

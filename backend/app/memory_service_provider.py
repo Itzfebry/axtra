@@ -9,6 +9,7 @@ from supabase import AsyncClient
 from app.config import get_settings
 from app.embeddings import build_embedding_provider
 from app.services.memory_extraction import MemoryExtractor
+from app.services.memory_curator import MemoryCurator
 from app.services.memory_service import MemoryService
 from app.llm import LLMProvider, LLMProviderError
 
@@ -40,3 +41,7 @@ def build_llm_provider() -> LLMProvider:
 
 def build_memory_extractor(llm: LLMProvider) -> MemoryExtractor:
     return MemoryExtractor(llm=llm, default_model=_settings().default_chat_model)
+
+
+def build_memory_curator(llm: LLMProvider) -> MemoryCurator:
+    return MemoryCurator(llm=llm, default_model=_settings().default_chat_model)

@@ -1,9 +1,14 @@
 "use client";
 
-import { Plus, Search, Trash2, Pencil, X } from "lucide-react";
+import { Combine, Plus, Search, Trash2, Pencil, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
-import { apiFetch } from "@/lib/api";
+import {
+  apiFetch,
+  fetchMemoryClusters,
+  mergeMemories,
+  type MemoryCluster,
+} from "@/lib/api";
 
 export type MemoryType =
   | "identity"
@@ -58,6 +63,12 @@ export default function MemoryPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editContent, setEditContent] = useState("");
 
+  const [clusters, setClusters] = useState<MemoryCluster[]>([]);
+  const [clustersLoading, setClustersLoading] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [merging, setMerging] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -78,6 +89,59 @@ export default function MemoryPage() {
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
   }, [load]);
+
+  const loadClusters = useCallback(async () => {
+    setClustersLoading(true);
+    try {
+      const data = await fetchMemoryClusters();
+      setClusters(data ?? []);
+    } catch {
+      setClusters([]);
+    } finally {
+      setClustersLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (filter || search.trim()) {
+      setClusters([]);
+      return;
+    }
+    const timer = setTimeout(() => void loadClusters(), 400);
+    return () => clearTimeout(timer);
+  }, [filter, search, loadClusters]);
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function runMerge(ids: string[]) {
+    const unique = Array.from(new Set(ids));
+    if (unique.length < 2) return;
+    const confirmed = window.confirm(
+      `Rangkum ${unique.length} memori jadi satu ringkasan?\n\nMemori asal akan dihapus permanen. Tindakan ini tidak dapat dibatalkan.`,
+    );
+    if (!confirmed) return;
+    setMerging(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await mergeMemories(unique);
+      setSelected(new Set());
+      setNotice(`Berhasil merangkum ${unique.length} memori jadi satu.`);
+      void load();
+      void loadClusters();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal merangkum memori.");
+    } finally {
+      setMerging(false);
+    }
+  }
 
   async function createMemory(event: React.FormEvent) {
     event.preventDefault();
@@ -117,6 +181,21 @@ export default function MemoryPage() {
     try {
       await apiFetch(`/memories/${memory.id}`, { method: "DELETE", body: "" });
       setMemories((prev) => prev.filter((item) => item.id !== memory.id));
+      setSelected((prev) => {
+        const next = new Set(prev);
+        next.delete(memory.id);
+        return next;
+      });
+      // Drop the deleted memory from any cluster; a cluster with fewer than two
+      // members is no longer a merge suggestion.
+      setClusters((prev) =>
+        prev
+          .map((cluster) => ({
+            ...cluster,
+            memories: cluster.memories.filter((item) => item.id !== memory.id),
+          }))
+          .filter((cluster) => cluster.memories.length >= 2),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal menghapus memori.");
     }
@@ -233,6 +312,71 @@ export default function MemoryPage() {
             </div>
           </div>
 
+          {(clustersLoading || clusters.length > 0) && !filter && !search.trim() && (
+            <section className="mt-5 rounded-lg border border-border bg-surface-muted/40 p-3">
+              <div className="flex items-center gap-2">
+                <Combine size={15} className="text-muted" aria-hidden />
+                <h2 className="text-[13px] font-medium">Topik serupa</h2>
+                {clustersLoading && (
+                  <span className="text-[12px] text-muted">Memindai...</span>
+                )}
+              </div>
+              <p className="mt-1 text-[12px] text-muted">
+                Kelompok memori bertopik sama. Rangkum jadi satu ringkasan, memori asal
+                dihapus permanen.
+              </p>
+              {!clustersLoading && clusters.length === 0 && (
+                <p className="mt-2 text-[12px] text-muted">
+                  Tidak ada topik serupa yang terdeteksi. Pilih manual di bawah bila perlu.
+                </p>
+              )}
+              <ul className="mt-3 space-y-3">
+                {clusters.map((cluster) => (
+                  <li
+                    key={cluster.key}
+                    className="rounded-lg border border-border bg-surface p-3"
+                  >
+                    <ul className="space-y-1">
+                      {cluster.memories.map((item) => (
+                        <li key={item.id} className="text-[12px] text-muted">
+                          · {item.content}
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="mt-2 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        disabled={merging}
+                        onClick={() =>
+                          void runMerge(cluster.memories.map((item) => item.id))
+                        }
+                        className="inline-flex h-8 items-center gap-1 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
+                      >
+                        <Combine size={13} aria-hidden />
+                        Rangkum
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelected(new Set(cluster.memories.map((item) => item.id)))
+                        }
+                        className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-[12px] text-muted transition-colors duration-150 hover:text-foreground"
+                      >
+                        Pilih manual
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {notice && (
+            <p className="mt-3 rounded-lg border border-border px-3 py-2 text-[12px] text-muted">
+              {notice}
+            </p>
+          )}
+
           {error && (
             <p
               role="alert"
@@ -240,6 +384,32 @@ export default function MemoryPage() {
             >
               {error}
             </p>
+          )}
+
+          {selected.size > 0 && (
+            <div className="sticky bottom-4 z-10 mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-surface px-3 py-2 shadow-sm">
+              <span className="text-[12px] text-muted">
+                {selected.size} memori dipilih
+              </span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={merging || selected.size < 2}
+                  onClick={() => void runMerge(Array.from(selected))}
+                  className="inline-flex h-8 items-center gap-1 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
+                >
+                  <Combine size={13} aria-hidden />
+                  Rangkum &amp; gabung
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelected(new Set())}
+                  className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-[12px] text-muted transition-colors duration-150 hover:text-foreground"
+                >
+                  Batal
+                </button>
+              </div>
+            </div>
           )}
 
           <div className="mt-4">
@@ -256,6 +426,13 @@ export default function MemoryPage() {
                 {memories.map((memory) => (
                   <li key={memory.id} className="px-4 py-3">
                     <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(memory.id)}
+                        onChange={() => toggleSelect(memory.id)}
+                        aria-label="Pilih memori untuk dirangkum"
+                        className="h-3.5 w-3.5 shrink-0 cursor-pointer accent-foreground"
+                      />
                       <span className="rounded border border-border px-1.5 py-0.5">
                         {TYPE_LABELS[memory.type]}
                       </span>

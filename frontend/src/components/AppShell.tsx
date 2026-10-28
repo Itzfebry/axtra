@@ -2,22 +2,13 @@
 
 import {
   Brain,
-  ChevronDown,
-  ChevronUp,
-  FolderKanban,
-  GraduationCap,
   Home,
   LogOut,
   Menu,
   MoreHorizontal,
-  NotebookPen,
   PanelLeftClose,
   PanelLeftOpen,
-  Search,
-  Settings,
-  Trash2,
   User,
-  Workflow,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,8 +17,11 @@ import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch, deleteConversation, logout } from "@/lib/api";
 import { closeTab } from "@/lib/chatStore";
-import { CHAT_MODES, getChatMode, isChatMode, type ChatMode } from "@/lib/chatModes";
+import { isChatMode, type ChatMode } from "@/lib/chatModes";
 import { ChatTabs } from "@/components/ChatTabs";
+import { ChatHistoryMenu } from "@/components/ChatHistoryMenu";
+import { FeatureSidebar } from "@/components/FeatureSidebar";
+import { PageTransition } from "@/components/PageTransition";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { UsageMeter } from "@/components/UsageMeter";
 
@@ -42,13 +36,6 @@ type Conversation = {
 };
 
 const PAGE_SIZE = 30;
-
-const FUTURE_ITEMS = [
-  { href: "/projects", label: "Proyek", icon: FolderKanban },
-  { href: "/journal", label: "Jurnal", icon: NotebookPen },
-  { href: "/mentor", label: "Mentor", icon: GraduationCap },
-  { href: "/automations", label: "Otomasi", icon: Workflow },
-];
 
 export function emitConversationsChanged() {
   if (typeof window !== "undefined") {
@@ -65,10 +52,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(false);
-  const [search, setSearch] = useState("");
   const [moreOpen, setMoreOpen] = useState(false);
   // Sidebar sections that the user can collapse. Persisted in localStorage.
-  const [modeNavOpen, setModeNavOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(true);
   const loadedCount = useRef(0);
   const loadingRef = useRef(false);
@@ -134,25 +119,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Restore persisted sidebar section states once on mount.
   useEffect(() => {
     try {
-      const storedModes = window.localStorage.getItem("axtra-mode-nav-open");
-      if (storedModes !== null) setModeNavOpen(storedModes === "1");
       const storedUsage = window.localStorage.getItem("axtra-usage-open");
       if (storedUsage !== null) setUsageOpen(storedUsage === "1");
     } catch {
       // Storage may be unavailable; keep defaults.
     }
-  }, []);
-
-  const toggleModeNav = useCallback(() => {
-    setModeNavOpen((value) => {
-      const next = !value;
-      try {
-        window.localStorage.setItem("axtra-mode-nav-open", next ? "1" : "0");
-      } catch {
-        // ignore
-      }
-      return next;
-    });
   }, []);
 
   const toggleUsage = useCallback(() => {
@@ -173,12 +144,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.refresh();
   }
 
-  const filtered = search.trim()
-    ? conversations.filter((conversation) =>
-        (conversation.title ?? "").toLowerCase().includes(search.trim().toLowerCase()),
-      )
-    : conversations;
-
   const chatSegment = pathname.startsWith("/chat/")
     ? pathname.slice("/chat/".length)
     : null;
@@ -188,20 +153,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const activeConversation = conversations.find(
     (conversation) => conversation.id === activeConversationId,
   );
-  const activeMode: ChatMode | null = routeMode ?? activeConversation?.mode ?? null;
+  // `/chat` (no segment) opens a fresh General chat, so its history is General's.
+  const activeMode: ChatMode | null =
+    routeMode ?? activeConversation?.mode ?? (pathname === "/chat" ? "general" : null);
   const visibleConversations = activeMode
-    ? filtered.filter((conversation) => conversation.mode === activeMode)
+    ? conversations.filter((conversation) => conversation.mode === activeMode)
     : [];
-  // Mode nav is hidden on the homepage (feature menu + settings).
-  const hideModeNav = pathname === "/";
-  // History is scoped to the active mode and only shown on a chat route, so a
-  // mode's conversations never appear outside its own page.
-  const showHistory = pathname.startsWith("/chat/") && activeMode !== null;
+  // The theme toggle lives only on the menu/preference pages; other pages show
+  // the conversation history control in its place.
+  const menuPage =
+    pathname === "/" ||
+    pathname === "/profile" ||
+    pathname === "/memory" ||
+    pathname === "/settings";
 
   const handleDeleteConversation = useCallback(
     async (conversationId: string) => {
-      deletedIds.current.add(conversationId);
       await deleteConversation(conversationId);
+      // Only hide the row once the server confirmed the delete, so a failed
+      // request keeps the conversation visible and retryable.
+      deletedIds.current.add(conversationId);
       closeTab(conversationId);
       setConversations((prev) => prev.filter((item) => item.id !== conversationId));
       if (activeConversationId === conversationId) {
@@ -216,23 +187,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <SidebarBody
       collapsed={collapsed}
       pathname={pathname}
-      activeConversationId={activeConversationId}
-      activeMode={activeMode}
-      hideModeNav={hideModeNav}
-      showHistory={showHistory}
-      modeNavOpen={modeNavOpen}
-      onToggleModeNav={toggleModeNav}
       usageOpen={usageOpen}
       onToggleUsage={toggleUsage}
-      filtered={visibleConversations}
-      search={search}
-      onSearch={setSearch}
-      hasMore={hasMore}
-      loading={loadingConversations}
       moreOpen={moreOpen}
       onToggleMore={() => setMoreOpen((value) => !value)}
-      onLoadMore={() => void loadConversations(true)}
-      onDeleteConversation={handleDeleteConversation}
       onNavigate={() => setDrawerOpen(false)}
       onToggleCollapse={() => setCollapsed((value) => !value)}
       onSignOut={handleSignOut}
@@ -271,23 +229,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <SidebarBody
               collapsed={false}
               pathname={pathname}
-              activeConversationId={activeConversationId}
-              activeMode={activeMode}
-              hideModeNav={hideModeNav}
-              showHistory={showHistory}
-              modeNavOpen={modeNavOpen}
-              onToggleModeNav={toggleModeNav}
               usageOpen={usageOpen}
               onToggleUsage={toggleUsage}
-              filtered={visibleConversations}
-              search={search}
-              onSearch={setSearch}
-              hasMore={hasMore}
-              loading={loadingConversations}
               moreOpen={moreOpen}
               onToggleMore={() => setMoreOpen((value) => !value)}
-              onLoadMore={() => void loadConversations(true)}
-              onDeleteConversation={handleDeleteConversation}
               onNavigate={() => setDrawerOpen(false)}
               onToggleCollapse={() => setDrawerOpen(false)}
               onSignOut={handleSignOut}
@@ -313,12 +258,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
           <div className="flex-1" />
           <UsageMeter />
-          <ThemeToggle />
+          {menuPage ? (
+            <ThemeToggle />
+          ) : (
+            <ChatHistoryMenu
+              conversations={visibleConversations}
+              activeConversationId={activeConversationId}
+              showModeLabel={!activeMode}
+              hasMore={hasMore}
+              loading={loadingConversations}
+              onLoadMore={() => void loadConversations(true)}
+              onNavigate={() => setDrawerOpen(false)}
+              onDeleteConversation={handleDeleteConversation}
+            />
+          )}
         </div>
 
         <main className="flex min-h-0 flex-1 flex-col">
           {pathname.startsWith("/chat/") && <ChatTabs />}
-          {children}
+          <PageTransition>{children}</PageTransition>
         </main>
       </div>
     </div>
@@ -328,23 +286,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 type SidebarProps = {
   collapsed: boolean;
   pathname: string;
-  activeConversationId: string | null;
-  activeMode: ChatMode | null;
-  hideModeNav: boolean;
-  showHistory: boolean;
-  modeNavOpen: boolean;
-  onToggleModeNav: () => void;
   usageOpen: boolean;
   onToggleUsage: () => void;
-  filtered: Conversation[];
-  search: string;
-  onSearch: (value: string) => void;
-  hasMore: boolean;
-  loading: boolean;
   moreOpen: boolean;
   onToggleMore: () => void;
-  onLoadMore: () => void;
-  onDeleteConversation: (conversationId: string) => Promise<void>;
   onNavigate: () => void;
   onToggleCollapse: () => void;
   onSignOut: () => void;
@@ -354,23 +299,10 @@ type SidebarProps = {
 function SidebarBody({
   collapsed,
   pathname,
-  activeConversationId,
-  activeMode,
-  hideModeNav,
-  showHistory,
-  modeNavOpen,
-  onToggleModeNav,
   usageOpen,
   onToggleUsage,
-  filtered,
-  search,
-  onSearch,
-  hasMore,
-  loading,
   moreOpen,
   onToggleMore,
-  onLoadMore,
-  onDeleteConversation,
   onNavigate,
   onToggleCollapse,
   onSignOut,
@@ -380,63 +312,8 @@ function SidebarBody({
     { href: "/", label: "Beranda", icon: Home },
     { href: "/memory", label: "Memori", icon: Brain },
     { href: "/profile", label: "Profil", icon: User },
-    { href: "/settings", label: "Pengaturan", icon: Settings },
   ];
   const rail = collapsed && !mobile;
-  // While inside a mode, show only that mode unless the user expands the list.
-  const visibleModes =
-    rail || modeNavOpen || !activeMode
-      ? CHAT_MODES
-      : CHAT_MODES.filter((chatMode) => chatMode.id === activeMode);
-
-  // Right-click context menu for a history item (delete with confirmation).
-  const [menu, setMenu] = useState<{ id: string; title: string; x: number; y: number } | null>(
-    null,
-  );
-  const [confirming, setConfirming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!menu) return;
-    const close = () => setMenu(null);
-    const onPointerDown = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) close();
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    window.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", close, true);
-    return () => {
-      window.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", close, true);
-    };
-  }, [menu]);
-
-  function openMenu(id: string, title: string, x: number, y: number) {
-    setConfirming(false);
-    setDeleteError(null);
-    setMenu({ id, title, x, y });
-  }
-
-  async function confirmDelete() {
-    if (!menu) return;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await onDeleteConversation(menu.id);
-      setMenu(null);
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Gagal menghapus.");
-    } finally {
-      setDeleting(false);
-      setConfirming(false);
-    }
-  }
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -462,132 +339,14 @@ function SidebarBody({
         </button>
       </div>
 
-      {!hideModeNav && (
-      <nav
-        aria-label="Mode chat"
-        className={`mt-2 ${rail ? "flex flex-col items-center gap-1 px-2" : "px-2"}`}
-      >
-        {!rail && (
-          <div className="flex items-center justify-between gap-2 px-2 pb-1">
-            <p className="text-[11px] uppercase tracking-wide text-muted">Mode</p>
-            {activeMode && (
-              <button
-                type="button"
-                onClick={onToggleModeNav}
-                aria-expanded={modeNavOpen}
-                aria-label={modeNavOpen ? "Sembunyikan mode lain" : "Tampilkan semua mode"}
-                title={modeNavOpen ? "Sembunyikan mode lain" : "Tampilkan semua mode"}
-                className="inline-flex h-5 w-5 items-center justify-center rounded text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
-              >
-                {modeNavOpen ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
-              </button>
-            )}
-          </div>
-        )}
-        <ul className={rail ? "space-y-1" : "space-y-0.5"}>
-          {visibleModes.map((chatMode) => {
-            const Icon = chatMode.icon;
-            const active = activeMode === chatMode.id;
-            return (
-              <li key={chatMode.id}>
-                <Link
-                  href={`/chat/${chatMode.id}`}
-                  onClick={onNavigate}
-                  title={chatMode.label}
-                  aria-current={active ? "page" : undefined}
-                  className={`flex items-center gap-2 rounded-lg text-[13px] transition-colors duration-150 ${
-                    rail ? "h-9 w-9 justify-center" : "px-2 py-1.5"
-                  } ${
-                    active
-                      ? "bg-surface-muted text-foreground"
-                      : "text-muted hover:bg-surface-muted hover:text-foreground"
-                  }`}
-                >
-                  <Icon size={16} aria-hidden />
-                  {!rail && <span>{chatMode.label}</span>}
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
-      </nav>
-      )}
-
-      {!rail && showHistory && (
-        <div className="px-2 pt-2">
-          <label htmlFor="conversation-search" className="sr-only">
-            Cari percakapan
-          </label>
-          <div className="flex h-9 items-center gap-2 rounded-lg border border-border bg-background px-2">
-            <Search size={15} className="shrink-0 text-muted" aria-hidden />
-            <input
-              id="conversation-search"
-              value={search}
-              onChange={(event) => onSearch(event.target.value)}
-              placeholder="Cari percakapan"
-              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted"
-            />
-          </div>
-        </div>
-      )}
-
-      {!rail && showHistory && (
-        <nav aria-label="Riwayat percakapan" className="mt-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          {filtered.length === 0 && !loading && (
-            <p className="px-2 py-2 text-[13px] text-muted">
-              {search.trim() ? "Tidak ada hasil." : "Belum ada riwayat."}
-            </p>
-          )}
-          <ul className="space-y-0.5">
-            {filtered.map((conversation) => {
-              const active = conversation.id === activeConversationId;
-              return (
-                <li key={conversation.id}>
-                  <Link
-                    href={`/chat/${conversation.id}`}
-                    onClick={onNavigate}
-                    onContextMenu={(event) => {
-                      event.preventDefault();
-                      openMenu(
-                        conversation.id,
-                        conversation.title ?? "Percakapan",
-                        event.clientX,
-                        event.clientY,
-                      );
-                    }}
-                    aria-current={active ? "page" : undefined}
-                    title={conversation.title ?? "Percakapan"}
-                    className={`flex items-center justify-between gap-2 rounded-lg px-2 py-2 text-[13px] transition-colors duration-150 ${
-                      active
-                        ? "bg-surface-muted text-foreground"
-                        : "text-muted hover:bg-surface-muted hover:text-foreground"
-                    }`}
-                  >
-                    <span className="truncate">{conversation.title ?? "Percakapan"}</span>
-                    {!activeMode && (
-                      <span className="shrink-0 text-[9px] uppercase tracking-wide text-muted">
-                        {getChatMode(conversation.mode).label}
-                      </span>
-                    )}
-                  </Link>
-                </li>
-              );
-            })}
-          </ul>
-          {hasMore && (
-            <button
-              type="button"
-              onClick={onLoadMore}
-              disabled={loading}
-              className="mt-2 w-full rounded-lg px-2 py-1.5 text-left text-[12px] text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground disabled:opacity-50"
-            >
-              {loading ? "Memuat…" : "Muat lebih banyak"}
-            </button>
-          )}
+      {!rail && (
+        <nav
+          aria-label="Menu fitur"
+          className="mt-2 min-h-0 flex-1 overflow-y-auto px-2 pb-2"
+        >
+          <FeatureSidebar />
         </nav>
       )}
-
-      {(rail || !showHistory) && <div className="flex-1" />}
 
       {!rail && (
         <div className="shrink-0 px-2 pt-2">
@@ -636,28 +395,6 @@ function SidebarBody({
                 </li>
               );
             })}
-            {!rail && (
-              <>
-                <li className="px-2 pt-2 text-[11px] uppercase tracking-wide text-muted">
-                  Segera
-                </li>
-                {FUTURE_ITEMS.map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <li key={item.href}>
-                      <span
-                        aria-disabled="true"
-                        title="Tersedia pada fase berikutnya"
-                        className="flex cursor-not-allowed items-center gap-2 rounded-lg px-2 py-2 text-[13px] text-muted opacity-50"
-                      >
-                        <Icon size={18} aria-hidden />
-                        <span>{item.label}</span>
-                      </span>
-                    </li>
-                  );
-                })}
-              </>
-            )}
           </ul>
         )}
 
@@ -676,63 +413,6 @@ function SidebarBody({
           <p className="mt-1 truncate px-1 text-[11px] text-muted">Pemilik</p>
         )}
       </div>
-
-      {menu && (
-        <div
-          ref={menuRef}
-          role="menu"
-          aria-label={`Aksi untuk ${menu.title}`}
-          style={{
-            top: Math.max(8, Math.min(menu.y, (window.innerHeight || 720) - 130)),
-            left: Math.max(8, Math.min(menu.x, (window.innerWidth || 1024) - 190)),
-          }}
-          className="fixed z-[60] w-44 overflow-hidden rounded-lg border border-border bg-surface py-1 text-[13px] shadow-lg"
-        >
-          <p className="truncate px-3 py-1.5 text-[11px] text-muted">{menu.title}</p>
-          {!confirming ? (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => setConfirming(true)}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-danger transition-colors duration-150 hover:bg-surface-muted"
-            >
-              <Trash2 size={14} aria-hidden />
-              Hapus percakapan
-            </button>
-          ) : (
-            <div className="px-3 pb-2 pt-1">
-              <p className="text-[12px] text-foreground">Hapus percakapan ini?</p>
-              <p className="mt-0.5 text-[11px] text-muted">Tindakan ini permanen.</p>
-              <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => void confirmDelete()}
-                  disabled={deleting}
-                  className="rounded-md bg-danger px-2.5 py-1.5 text-[12px] font-medium text-white transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
-                >
-                  {deleting ? "Menghapus..." : "Ya, hapus"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setConfirming(false);
-                    setMenu(null);
-                  }}
-                  disabled={deleting}
-                  className="rounded-md border border-border px-2.5 py-1.5 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-50"
-                >
-                  Batal
-                </button>
-              </div>
-              {deleteError && (
-                <p role="alert" className="mt-1.5 text-[11px] text-danger">
-                  {deleteError}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     # Memory retrieval
     memory_retrieval_count: int = 6
     memory_min_similarity: float = 0.25
+    memory_cluster_similarity: float = 0.82
     memory_extraction_enabled: bool = True
 
     # Guardrails
@@ -58,7 +59,7 @@ class Settings(BaseSettings):
     model_tpm_limit: int = 8000
     model_daily_token_limit: int = 200000
 
-    @field_validator("memory_min_similarity", mode="before")
+    @field_validator("memory_min_similarity", "memory_cluster_similarity", mode="before")
     @classmethod
     def _coerce_float(cls, value: object) -> object:
         if isinstance(value, str):

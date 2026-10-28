@@ -120,7 +120,7 @@ npm run dev                  # http://localhost:3000
 
 - **Auth:** satu kata sandi bersama (`APP_PASSWORD`). Login men-set cookie HttpOnly bertanda tangan (`axtra_session`), logout menghapusnya. Setelah login pengguna diarahkan ke beranda `/` (bukan langsung ke chat). Middleware hanya mengecek keberadaan cookie; validitas sesi diverifikasi backend. Tidak ada signup, tidak ada Supabase Auth.
 - **Chat streaming:** SSE dari FastAPI (`/api/chat`) — event `meta`, `token`, `done`, `memory`, `warning`, `error`; percakapan + pesan tersimpan ke Supabase. `done` dikirim begitu jawaban tersimpan, sebelum ekstraksi memori, agar composer langsung bisa dipakai untuk pesan berikutnya. Pesan pengguna terbaru selalu dikirim ke LLM pada turn yang sama.
-- **Mode chat:** `/chat` menampilkan pemilih mode; masing-masing punya prompt, saran, dan riwayat sendiri:
+- **Mode chat:** `/chat` langsung membuka mode `general` (tanpa pemilih mode); masing-masing mode punya prompt, saran, dan riwayat sendiri:
   - `general` — percakapan serba guna, ringkas dan praktis.
   - `curhat` — pendengar empatik, memvalidasi perasaan dulu, tidak buru-buru memberi solusi.
   - `brainstorming` — 5–10 ide beragam, menandai ide paling layak.
@@ -139,6 +139,7 @@ npm run dev                  # http://localhost:3000
   - Otomatis: dipicu setelah tiap jawaban, LLM mengekstrak fakta layak-ingat lalu disimpan dengan `source=chat` + `confidence`.
   - Manual: tambah/koreksi/hapus dari halaman `/memory`.
   - Retrieval: `match_memories_semantic` (pgvector) jika embedding tersedia, fallback `search_memories_keyword` (full-text).
+  - Rangkum topik serupa: di `/memory`, `GET /api/memories/clusters` mengelompokkan memori aktif bertopik sama (cluster kemiripan pgvector jika embedding tersedia, fallback pengelompokan LLM). `POST /api/memories/merge` merangkum memori terpilih jadi satu via LLM lalu **hard-delete** memori asal. Bisa otomatis per grup atau pilih manual (multi-checkbox).
 - **Profil:** identitas dasar (nama, zona waktu, gaya komunikasi) yang diberikan ke prompt sistem.
 - **Design system:** mengikuti `Design.md` — black-first (light mode opsional), palet netral tanpa aksen/glow/shadow dekoratif, token CSS terpusat, system font, ikon Lucide, sidebar 224px collapsible + drawer mobile, markdown + copy kode, tombol stop streaming, empty state 4 prompt, reduced-motion, focus-visible, dan label ARIA.
 - **Keamanan:** semua query lewat service-role client backend; RLS aktif tanpa policy (anon ditolak); cookie HttpOnly + SameSite=Lax, `Secure` saat production; rate limit chat/tulis per owner dan rate limit login per IP; error tidak leaking detail internal.

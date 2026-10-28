@@ -17,6 +17,7 @@ import {
   visibleContent,
 } from "@/lib/chatStore";
 import { getChatMode, type ChatMode } from "@/lib/chatModes";
+import { takePrompt } from "@/lib/orchestratorBridge";
 
 function formatSeconds(seconds: number): string {
   return `${seconds.toFixed(1).replace(".", ",")} dtk`;
@@ -47,6 +48,7 @@ export function ChatPanel({
   const stickToBottom = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingHandled = useRef(false);
 
   // Open (or re-activate) the tab for this route; the store owns the state.
   useEffect(() => {
@@ -59,6 +61,16 @@ export function ChatPanel({
   const mode = slice?.mode ?? routeMode;
   const modeConfig = getChatMode(mode);
   const ModeIcon = modeConfig.icon;
+
+  // Auto-send a prompt handed off by the homepage orchestrator.
+  useEffect(() => {
+    if (pendingHandled.current || !activeKey || slice?.loading) return;
+    const handedOff = takePrompt(mode);
+    if (!handedOff) return;
+    pendingHandled.current = true;
+    stickToBottom.current = true;
+    void send(activeKey, handedOff);
+  }, [activeKey, mode, slice?.loading]);
 
   const modeCommands = useMemo(
     () => commandsByMode[mode as ChatModeId] ?? [],

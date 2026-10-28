@@ -134,6 +134,79 @@ class MemorySearchOut(MemoryOut):
     score: float | None = None
 
 
+class MemoryClusterOut(BaseModel):
+    key: str
+    memories: list[MemoryOut] = Field(default_factory=list)
+
+
+class MemoryMergeRequest(BaseModel):
+    ids: list[str] = Field(min_length=2, max_length=50)
+    type: MemoryType | None = None
+
+
+# ---------------------------------------------------------------------------
+# Assistant recommendations (homepage digest of interaction history)
+# ---------------------------------------------------------------------------
+class RecommendationOut(BaseModel):
+    greeting: str
+    items: list[str] = Field(default_factory=list)
+    conversation_count: int = 0
+    memory_count: int = 0
+    generated_at: datetime
+    source: Literal["llm", "fallback", "empty"] = "llm"
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator (homepage assistant that configures menus and navigates)
+# ---------------------------------------------------------------------------
+class MenuEntry(BaseModel):
+    id: str
+    label: str
+    live: bool = False
+    href: str | None = None
+    visible: bool = True
+
+
+class OrchestratorMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(max_length=4000)
+
+
+class OrchestratorRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=4000)
+    menu: list[MenuEntry] = Field(default_factory=list)
+    history: list[OrchestratorMessage] = Field(default_factory=list)
+
+
+class OrchestratorAction(BaseModel):
+    type: Literal[
+        "menu_order",
+        "menu_visibility",
+        "menu_rename",
+        "navigate",
+        "reset_menu",
+        "set_theme",
+        "save_memory",
+        "new_conversation",
+        "focus_menu",
+    ]
+    order: list[str] | None = None
+    hidden: list[str] | None = None
+    labels: dict[str, str] | None = None
+    href: str | None = None
+    prompt: str | None = None
+    theme: Literal["light", "dark"] | None = None
+    content: str | None = None
+    title: str | None = None
+    mode: str | None = None
+    target: str | None = None
+
+
+class OrchestratorOut(BaseModel):
+    reply: str
+    actions: list[OrchestratorAction] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Token usage
 # ---------------------------------------------------------------------------

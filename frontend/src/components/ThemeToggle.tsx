@@ -19,6 +19,20 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
     setMounted(true);
   }, []);
 
+  // Keep in sync when another surface (e.g. the orchestrator) sets the theme.
+  useEffect(() => {
+    const sync = () => setTheme(currentTheme());
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "axtra-theme") sync();
+    };
+    window.addEventListener("axtra:theme-changed", sync);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("axtra:theme-changed", sync);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, []);
+
   function toggle() {
     const next: Theme = theme === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;

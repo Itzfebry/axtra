@@ -81,6 +81,14 @@ export async function logout(): Promise<void> {
   } catch {
     // Ignore network failures; the client still navigates to /login.
   }
+  // Personal caches must not survive a sign-out on a shared browser.
+  try {
+    window.localStorage.removeItem("axtra-recommendations");
+    window.localStorage.removeItem("axtra-menu-config");
+    window.sessionStorage.removeItem("axtra-pending-prompt");
+  } catch {
+    // Storage may be unavailable; nothing to clear.
+  }
 }
 
 export async function authStatus(): Promise<boolean> {
@@ -224,6 +232,104 @@ export type UsageStats = {
 
 export async function fetchUsage(): Promise<UsageStats> {
   return apiFetch<UsageStats>("/usage");
+}
+
+// ---------------------------------------------------------------------------
+// Assistant recommendations (homepage digest of interaction history)
+// ---------------------------------------------------------------------------
+export type Recommendations = {
+  greeting: string;
+  items: string[];
+  conversation_count: number;
+  memory_count: number;
+  generated_at: string;
+  source: "llm" | "fallback" | "empty";
+};
+
+export async function fetchRecommendations(): Promise<Recommendations> {
+  return apiFetch<Recommendations>("/recommendations");
+}
+
+// ---------------------------------------------------------------------------
+// Homepage orchestrator (menu configuration + navigation)
+// ---------------------------------------------------------------------------
+export type OrchestratorMenuEntry = {
+  id: string;
+  label: string;
+  live: boolean;
+  href: string | null;
+  visible: boolean;
+};
+
+export type OrchestratorAction =
+  | { type: "menu_order"; order?: string[] }
+  | { type: "menu_visibility"; hidden?: string[] }
+  | { type: "menu_rename"; labels?: Record<string, string> }
+  | { type: "navigate"; href?: string; prompt?: string }
+  | { type: "reset_menu" }
+  | { type: "set_theme"; theme?: "light" | "dark" }
+  | { type: "save_memory"; content?: string }
+  | { type: "new_conversation"; mode?: string; title?: string; prompt?: string }
+  | { type: "focus_menu"; target?: string };
+
+export type OrchestratorResponse = {
+  reply: string;
+  actions: OrchestratorAction[];
+};
+
+export async function orchestrate(input: {
+  message: string;
+  menu: OrchestratorMenuEntry[];
+  history: { role: "user" | "assistant"; content: string }[];
+}): Promise<OrchestratorResponse> {
+  return apiFetch<OrchestratorResponse>("/orchestrator", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Quick manual memory, e.g. from an orchestrator "save_memory" action. */
+export async function createMemory(input: {
+  content: string;
+  type?: string;
+  source?: string;
+}): Promise<void> {
+  await apiFetch<void>("/memories", {
+    method: "POST",
+    body: JSON.stringify({ type: "semantic", source: "orchestrator", ...input }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Memory curation (group same-topic memories, merge into one summary)
+// ---------------------------------------------------------------------------
+export type MemoryClusterMember = {
+  id: string;
+  type: string;
+  content: string;
+  source: string;
+  confidence: number;
+  status: string;
+  created_at: string | null;
+};
+
+export type MemoryCluster = {
+  key: string;
+  memories: MemoryClusterMember[];
+};
+
+export async function fetchMemoryClusters(): Promise<MemoryCluster[]> {
+  return apiFetch<MemoryCluster[]>("/memories/clusters");
+}
+
+export async function mergeMemories(
+  ids: string[],
+  type?: string,
+): Promise<MemoryClusterMember> {
+  return apiFetch<MemoryClusterMember>("/memories/merge", {
+    method: "POST",
+    body: JSON.stringify(type ? { ids, type } : { ids }),
+  });
 }
 
 /** Streamed chat over SSE. Yields typed events, never throws mid-stream. */

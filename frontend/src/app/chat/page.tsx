@@ -1,10 +1,10 @@
 import { AppShell } from "@/components/AppShell";
-import { ChatModePicker } from "@/components/ChatModePicker";
+import { ChatPanel } from "@/components/ChatPanel";
 
 export default function NewChatPage() {
   return (
     <AppShell>
-      <ChatModePicker />
+      <ChatPanel conversationId={null} mode="general" />
     </AppShell>
   );
 }

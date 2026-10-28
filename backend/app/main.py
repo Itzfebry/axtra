@@ -22,7 +22,9 @@ from app.routers import (
     documents,
     health,
     memories,
+    orchestrator,
     profile,
+    recommendations,
     usage,
 )
 
@@ -98,6 +100,8 @@ def create_app() -> FastAPI:
     app.include_router(conversations.router)
     app.include_router(documents.router)
     app.include_router(memories.router)
+    app.include_router(recommendations.router)
+    app.include_router(orchestrator.router)
     app.include_router(usage.router)
 
     @app.exception_handler(Exception)
