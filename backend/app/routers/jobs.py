@@ -27,8 +27,9 @@ from app.schemas import (
     JobStatus,
 )
 from app.services.job_service import JobCoach
+from app.services.crawl_provider import crawl, resolve_user_provider
 from app.services.usage_service import record_usage
-from app.services.web_crawler import CrawlError, fetch_page, normalize_url
+from app.services.web_crawler import CrawlError, normalize_url
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -319,14 +320,22 @@ async def crawl_application(
         )
     try:
         normalized = normalize_url(raw_url)
-        page = await fetch_page(
+    except CrawlError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    provider = await resolve_user_provider(user.client, user.id, settings)
+    try:
+        outcome = await crawl(
             normalized,
-            timeout=settings.research_fetch_timeout,
-            max_bytes=settings.research_max_bytes,
+            settings=settings,
+            client=user.client,
+            user_id=user.id,
+            provider=provider,
         )
     except CrawlError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    page = outcome.page
     patch = {
         "job_url": page.url,
         "job_title": page.title[:300],
@@ -340,7 +349,9 @@ async def crawl_application(
         .eq("user_id", user.id)
         .execute()
     )
-    return _to_out(response.data[0])
+    out = _to_out(response.data[0])
+    out.crawl_notice = outcome.notice
+    return out
 
 
 @router.post("/{job_id}/analyze", response_model=JobApplicationOut)

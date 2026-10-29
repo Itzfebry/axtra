@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     memory_min_similarity: float = 0.25
     memory_cluster_similarity: float = 0.82
     memory_extraction_enabled: bool = True
+    # When true, chat retrieval only uses memories from the same chat mode (or
+    # unscoped/manual ones). Default false: all modes share one memory pool.
+    memory_scope_by_mode: bool = False
 
     # GitHub repository indexing (RAG over project code)
     # Token is optional; without it only public repos are readable (60 req/h).
@@ -77,6 +80,24 @@ class Settings(BaseSettings):
     research_max_sources: int = 5
     research_fetch_timeout: float = 15.0
     research_max_bytes: int = 2 * 1024 * 1024
+
+    # Crawl provider: "httpx" (built-in parser, default) or "firecrawl" (opt-in).
+    # Firecrawl is an external API; its key lives only here in the server env and
+    # is never sent to or stored by the browser. Self-hosting is supported by
+    # pointing firecrawl_base_url at the local instance and (only when the
+    # instance truly runs without auth) setting firecrawl_allow_empty_key.
+    crawl_provider: str = "httpx"
+    firecrawl_api_key: str = ""
+    firecrawl_base_url: str = "https://api.firecrawl.dev"
+    firecrawl_allow_empty_key: bool = False
+    firecrawl_timeout_ms: int = 60000
+    # Firecrawl free tier = 1000 credits/month; cap daily usage so the monthly
+    # quota is not drained in a few days. One markdown scrape ~= 1 credit.
+    firecrawl_daily_credits: int = 30
+    firecrawl_monthly_credits: int = 1000
+    # Firecrawl's own prompt-injection scan (extra credits). Axtra already
+    # guards at the prompt level, so this stays off unless explicitly enabled.
+    firecrawl_check_prompt_injection: bool = False
 
     # Token usage display (denominators for the navbar/sidebar meters).
     # Set to 0 to hide the corresponding limit/percentage.

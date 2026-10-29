@@ -12,8 +12,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.config import Settings, get_settings
 from app.deps import CurrentUser, rate_limit, read_rate_limit
-from app.schemas import ResearchCrawlRequest, ResearchSourceOut
-from app.services.web_crawler import CrawlError, fetch_page, normalize_url
+from app.memory_service_provider import (
+    build_llm_provider,
+    build_memory_extractor,
+    build_memory_service,
+)
+from app.schemas import MemoryOut, ResearchCrawlRequest, ResearchSourceOut
+from app.services.crawl_provider import crawl, resolve_user_provider
+from app.services.usage_service import record_usage
+from app.services.web_crawler import CrawlError, normalize_url
 
 router = APIRouter(prefix="/api/research", tags=["research"])
 
@@ -56,7 +63,9 @@ def _excerpt(text: str, limit: int = 280) -> str:
     return cleaned[:limit].rstrip() + "..."
 
 
-def _to_source(row: dict[str, Any]) -> ResearchSourceOut:
+def _to_source(
+    row: dict[str, Any], notice: str | None = None
+) -> ResearchSourceOut:
     content = row.get("content") or ""
     return ResearchSourceOut(
         id=row["id"],
@@ -66,6 +75,8 @@ def _to_source(row: dict[str, Any]) -> ResearchSourceOut:
         site=row.get("site") or "",
         excerpt=_excerpt(content),
         char_count=len(content),
+        provider=row.get("provider") or "",
+        notice=notice,
         created_at=row.get("created_at"),
     )
 
@@ -87,6 +98,22 @@ async def crawl_page(
         user.client, user.id, payload.conversation_id
     )
 
+    # Cache: reuse a source already crawled for this URL in this conversation.
+    # Scoped to the conversation (hence one user) so content never leaks across.
+    cached = (
+        await user.client.table("research_sources")
+        .select("id, conversation_id, url, title, site, content, provider, created_at")
+        .eq("conversation_id", conversation_id)
+        .eq("url", url)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if cached.data:
+        return _to_source(
+            cached.data[0], notice="Memakai sumber tersimpan di percakapan ini."
+        )
+
     existing = (
         await user.client.table("research_sources")
         .select("id", count="exact")
@@ -102,15 +129,19 @@ async def crawl_page(
             ),
         )
 
+    provider = await resolve_user_provider(user.client, user.id, settings)
     try:
-        page = await fetch_page(
+        outcome = await crawl(
             url,
-            timeout=settings.research_fetch_timeout,
-            max_bytes=settings.research_max_bytes,
+            settings=settings,
+            client=user.client,
+            user_id=user.id,
+            provider=provider,
         )
     except CrawlError as exc:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    page = outcome.page
     content = page.text[: settings.research_max_chars]
     response = (
         await user.client.table("research_sources")
@@ -118,15 +149,16 @@ async def crawl_page(
             {
                 "user_id": user.id,
                 "conversation_id": conversation_id,
-                "url": page.url,
+                "url": url,
                 "title": page.title[:300],
                 "site": page.site[:200],
                 "content": content,
+                "provider": outcome.provider,
             }
         )
         .execute()
     )
-    return _to_source(response.data[0])
+    return _to_source(response.data[0], notice=outcome.notice)
 
 
 @router.get("/sources", response_model=list[ResearchSourceOut])
@@ -136,7 +168,7 @@ async def list_sources(
 ) -> list[ResearchSourceOut]:
     response = (
         await user.client.table("research_sources")
-        .select("id, conversation_id, url, title, site, content, created_at")
+        .select("id, conversation_id, url, title, site, content, provider, created_at")
         .eq("conversation_id", conversation_id)
         .eq("user_id", user.id)
         .order("created_at")
@@ -157,3 +189,58 @@ async def delete_source(
         .eq("user_id", user.id)
         .execute()
     )
+
+
+@router.post("/sources/{source_id}/memory", response_model=list[MemoryOut])
+async def save_source_to_memory(
+    source_id: str,
+    user: CurrentUser = Depends(rate_limit),
+) -> list[MemoryOut]:
+    """Extract durable facts from a crawled source and store them as memories.
+
+    Near-duplicates update the existing memory instead of creating a copy.
+    """
+    response = (
+        await user.client.table("research_sources")
+        .select("id, url, title, content")
+        .eq("id", source_id)
+        .eq("user_id", user.id)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    if not rows:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Sumber tidak ditemukan."
+        )
+    row = rows[0]
+
+    try:
+        llm = build_llm_provider()
+    except Exception as exc:  # noqa: BLE001 - provider misconfiguration
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Ekstraksi memori tidak tersedia.",
+        ) from exc
+
+    extractor = build_memory_extractor(llm)
+    text = (row.get("content") or "").strip()[:8000]
+    extracted, usage, model = await extractor.extract(text, recent_context="")
+    await record_usage(user.client, user.id, model, usage, source="memory")
+
+    memory_service = build_memory_service(user.client)
+    ref = {"source_id": row["id"], "url": row.get("url"), "title": row.get("title")}
+    saved: list[MemoryOut] = []
+    for item in extracted:
+        memory, action = await memory_service.upsert_fact(
+            user.id,
+            type_=item.type,
+            content=item.content,
+            source="research",
+            source_ref=ref,
+            metadata={"mode": "research"},
+            confidence=item.confidence,
+        )
+        if action != "skipped":
+            saved.append(memory)
+    return saved
