@@ -171,6 +171,8 @@ export type ResearchSource = {
   site: string;
   excerpt: string;
   char_count: number;
+  provider?: string;
+  notice?: string | null;
   created_at: string | null;
 };
 
@@ -194,6 +196,13 @@ export async function listResearchSources(
 
 export async function deleteResearchSource(sourceId: string): Promise<void> {
   await apiFetch<void>(`/research/sources/${sourceId}`, { method: "DELETE" });
+}
+
+/** Extract durable facts from a crawled source and store them as memories. */
+export async function saveResearchSourceToMemory(
+  sourceId: string,
+): Promise<{ id: string; type: string; content: string }[]> {
+  return apiFetch(`/research/sources/${sourceId}/memory`, { method: "POST" });
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +241,7 @@ export type JobApplication = {
   analyzed_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+  crawl_notice?: string | null;
 };
 
 export type JobApplicationInput = {
@@ -700,10 +710,24 @@ export type ModeSelection = {
   behavior: string;
 };
 
+export type CrawlProviderId = "httpx" | "firecrawl";
+
+export type CrawlSettings = {
+  provider: CrawlProviderId;
+  firecrawl_ready: boolean;
+  firecrawl_key_configured: boolean;
+  firecrawl_base_url: string;
+  daily_limit: number;
+  monthly_limit: number;
+  daily_used: number;
+  monthly_used: number;
+};
+
 export type ChatSettings = {
   modes: ModeCatalogEntry[];
   commands: Partial<Record<ChatModeId, ChatCommand[]>>;
   selected: Record<ChatModeId, ModeSelection>;
+  crawl?: CrawlSettings;
 };
 
 export async function fetchChatSettings(): Promise<ChatSettings> {
@@ -717,6 +741,15 @@ export async function saveChatSettings(input: {
   role_note: string;
 }): Promise<ChatSettings> {
   return apiFetch<ChatSettings>("/chat-settings", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function saveCrawlSettings(input: {
+  provider: CrawlProviderId;
+}): Promise<CrawlSettings> {
+  return apiFetch<CrawlSettings>("/chat-settings/crawl", {
     method: "PUT",
     body: JSON.stringify(input),
   });
@@ -773,7 +806,7 @@ export type OrchestratorAction =
   | { type: "navigate"; href?: string; prompt?: string }
   | { type: "reset_menu" }
   | { type: "set_theme"; theme?: "light" | "dark" }
-  | { type: "save_memory"; content?: string }
+  | { type: "save_memory"; content?: string; memory_type?: string }
   | { type: "new_conversation"; mode?: string; title?: string; prompt?: string }
   | { type: "focus_menu"; target?: string };
 

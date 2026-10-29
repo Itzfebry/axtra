@@ -180,6 +180,64 @@ class MemoryService:
             .execute()
         )
 
+    async def upsert_fact(
+        self,
+        user_id: str,
+        *,
+        type_: str,
+        content: str,
+        source: str = "manual",
+        source_ref: dict[str, Any] | None = None,
+        confidence: float = 0.9,
+        metadata: dict[str, Any] | None = None,
+        similarity_threshold: float = 0.92,
+    ) -> tuple[MemoryOut, str]:
+        """Create a fact, but update a near-duplicate instead of duplicating it.
+
+        Returns ``(memory, action)`` where action is ``created``, ``updated`` or
+        ``skipped`` (exact content already active). Near-duplicate detection uses
+        embeddings when available; without them only exact matches are skipped.
+        """
+        existing = await self.find_active_by_content(user_id, content)
+        if existing is not None:
+            return existing, "skipped"
+
+        if self._embeddings.available:
+            try:
+                candidates = await self.retrieve(user_id, content, limit=3)
+                for candidate in candidates:
+                    if (
+                        candidate.content != content
+                        and candidate.type == type_
+                        and (candidate.score or 0.0) >= similarity_threshold
+                    ):
+                        merged_metadata = {**candidate.metadata, **(metadata or {})}
+                        merged_ref = {**candidate.source_ref, **(source_ref or {})}
+                        updated = await self.update(
+                            user_id,
+                            candidate.id,
+                            {
+                                "content": content,
+                                "confidence": confidence,
+                                "metadata": merged_metadata,
+                                "source_ref": merged_ref,
+                            },
+                        )
+                        return updated, "updated"
+            except Exception:
+                pass  # best-effort; fall back to create
+
+        created = await self.create(
+            user_id,
+            type_=type_,
+            content=content,
+            source=source,
+            source_ref=source_ref,
+            confidence=confidence,
+            metadata=metadata,
+        )
+        return created, "created"
+
     async def delete(self, user_id: str, memory_id: str) -> None:
         await (
             self._client.table(TABLE)
@@ -254,6 +312,22 @@ class MemoryService:
             if vector:
                 vectors[row["memory_id"]] = vector
         return vectors
+
+    async def find_active_by_content(
+        self, user_id: str, content: str
+    ) -> MemoryOut | None:
+        """Return the active memory with exactly this content, if any."""
+        response = (
+            await self._client.table(TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("content", content)
+            .eq("status", "active")
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+        return _row_to_memory(rows[0]) if rows else None
 
     async def exists_active(self, user_id: str, content: str) -> bool:
         response = (

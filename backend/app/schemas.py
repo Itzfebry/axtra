@@ -93,6 +93,10 @@ class ChatModeSettingsUpdate(BaseModel):
     role_note: str = Field(default="", max_length=500)
 
 
+class CrawlProviderSettingsUpdate(BaseModel):
+    provider: Literal["httpx", "firecrawl"]
+
+
 class DocumentOut(BaseModel):
     id: str
     conversation_id: str
@@ -118,6 +122,8 @@ class ResearchSourceOut(BaseModel):
     site: str = ""
     excerpt: str = ""
     char_count: int = 0
+    provider: str = ""
+    notice: str | None = None
     created_at: datetime | None = None
 
 
@@ -184,6 +190,8 @@ class JobApplicationOut(BaseModel):
     analyzed_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # Transient: set only on the crawl response (provider fallback notice).
+    crawl_notice: str | None = None
 
 
 class JobCvOut(BaseModel):
@@ -470,6 +478,7 @@ class OrchestratorAction(BaseModel):
     prompt: str | None = None
     theme: Literal["light", "dark"] | None = None
     content: str | None = None
+    memory_type: MemoryType | None = None
     title: str | None = None
     mode: str | None = None
     target: str | None = None

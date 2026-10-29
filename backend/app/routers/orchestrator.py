@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends
 from app.config import get_settings
 from app.deps import CurrentUser, rate_limit
 from app.llm import ChatMessage, ChatRequest
-from app.memory_service_provider import build_llm_provider
+from app.memory_service_provider import build_llm_provider, build_memory_service
 from app.schemas import (
     OrchestratorAction,
     OrchestratorOut,
@@ -39,6 +39,15 @@ _CHAT_MODE_ROUTES: dict[str, str] = {
 }
 _ALLOWED_ROUTES |= set(_CHAT_MODE_ROUTES)
 _CHAT_MODES = ["general", "curhat", "brainstorming", "document", "research"]
+_MEMORY_TYPES = {
+    "identity",
+    "episodic",
+    "semantic",
+    "project",
+    "goal",
+    "skill",
+    "conversation",
+}
 
 _SYSTEM_PROMPT = """\
 Kamu adalah Axtra, orchestrator untuk halaman menu ruang kerja pengguna.
@@ -70,7 +79,7 @@ Balas HANYA JSON valid tanpa teks lain:
     {"type": "menu_visibility", "hidden": ["<id>", "..."]},
     {"type": "menu_rename", "labels": {"<id>": "<nama baru>"}},
     {"type": "set_theme", "theme": "light"},
-    {"type": "save_memory", "content": "<fakta yang ingin diingat>"},
+    {"type": "save_memory", "content": "<fakta yang ingin diingat>", "memory_type": "<identity|episodic|semantic|project|goal|skill|conversation>"},
     {"type": "reset_menu"}
   ]
 }
@@ -90,7 +99,12 @@ yang ada di konteks.
 - menu_visibility: hidden berisi id yang harus disembunyikan (selain itu tampil).
 - menu_rename: hanya id dan label yang disebut pengguna.
 - set_theme: theme bernilai "light" atau "dark".
-- save_memory: simpan fakta personal yang jelas dan berulang; "content" singkat.
+- save_memory: simpan fakta personal yang jelas dan berulang; "content" singkat. \
+"memory_type" wajib salah satu: identity (nama/identitas), episodic (peristiwa), \
+semantic (fakta umum), project (proyek), goal (target), skill (kemampuan), \
+conversation (ringkasan percakapan). Bila ragu pakai semantic.
+- Gunakan MEMORI RELEVAN di konteks untuk memahami pengguna. Jangan menyalin \
+atau menyimpan ulang memori yang sudah tercantum.
 - reset_menu: tanpa field lain.
 - Sertakan actions: [] bila tidak ada aksi yang cocok.
 - Jangan mengarang id, nama fitur, rute, atau fakta.
@@ -111,6 +125,23 @@ def _menu_context(request: OrchestratorRequest) -> str:
         lines.append(f"- href={href} | {description}")
     routes = sorted({item.href for item in request.menu if item.href} | _ALLOWED_ROUTES)
     lines.append("RUTE YANG DIIZINKAN: " + ", ".join(routes))
+    return "\n".join(lines)
+
+
+async def _memory_context(user: CurrentUser, message: str) -> str:
+    """Best-effort personal context: the memories most relevant to the request."""
+    try:
+        memory_service = build_memory_service(user.client)
+        memories = await memory_service.retrieve(user.id, message, limit=5)
+    except Exception:
+        return ""
+    if not memories:
+        return ""
+    lines = [
+        "MEMORI RELEVAN (konteks personal pengguna; jangan mengarang di luar ini):"
+    ]
+    for memory in memories:
+        lines.append(f"- [{memory.type}] {memory.content}")
     return "\n".join(lines)
 
 
@@ -185,8 +216,15 @@ def _sanitize_actions(
         elif action_type == "save_memory":
             content = raw.get("content")
             if isinstance(content, str) and content.strip():
+                memory_type = raw.get("memory_type")
+                if memory_type not in _MEMORY_TYPES:
+                    memory_type = "semantic"
                 actions.append(
-                    OrchestratorAction(type="save_memory", content=content.strip()[:500])
+                    OrchestratorAction(
+                        type="save_memory",
+                        content=content.strip()[:500],
+                        memory_type=memory_type,
+                    )
                 )
         elif action_type == "new_conversation":
             mode = raw.get("mode")
@@ -217,8 +255,13 @@ async def orchestrate(
     """Interpret a natural-language request into menu actions and a reply."""
     settings = get_settings()
     context = _menu_context(request)
+    memories = await _memory_context(user, request.message)
 
-    messages = [ChatMessage(role="system", content=_SYSTEM_PROMPT + "\n\n" + context)]
+    system = _SYSTEM_PROMPT + "\n\n" + context
+    if memories:
+        system += "\n\n" + memories
+
+    messages = [ChatMessage(role="system", content=system)]
     for item in request.history[-8:]:
         messages.append(ChatMessage(role=item.role, content=item.content))
     messages.append(ChatMessage(role="user", content=request.message))

@@ -70,6 +70,7 @@ export type ChatSlice = {
   sourcesLoaded: boolean;
   crawling: boolean;
   crawlError: string | null;
+  crawlNotice: string | null;
 };
 
 type State = {
@@ -141,6 +142,7 @@ function blankSlice(
     sourcesLoaded: false,
     crawling: false,
     crawlError: null,
+    crawlNotice: null,
   };
 }
 
@@ -567,7 +569,7 @@ export async function crawlSource(key: string, url: string) {
   if (!slice || slice.crawling) return;
   const trimmed = url.trim();
   if (!trimmed) return;
-  updateSlice(key, { crawling: true, crawlError: null });
+  updateSlice(key, { crawling: true, crawlError: null, crawlNotice: null });
   let targetKey = key;
   try {
     const source = await apiCrawlUrl(trimmed, slice.conversationId);
@@ -587,6 +589,7 @@ export async function crawlSource(key: string, url: string) {
             sourcesLoaded: true,
             crawling: false,
             crawlError: null,
+            crawlNotice: source.notice ?? null,
           },
         },
       });

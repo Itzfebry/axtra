@@ -1,9 +1,10 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Send } from "lucide-react";
+import { Briefcase, FolderKanban, Globe, MessageSquare, Send } from "lucide-react";
 
 import { AssistantDigest } from "@/components/AssistantDigest";
 import {
@@ -23,6 +24,14 @@ const MENU_ACTION_TYPES = new Set([
   "menu_rename",
   "reset_menu",
 ]);
+
+/** Primary entry points surfaced on the home empty state. */
+const SHORTCUTS = [
+  { href: "/chat", label: "Chat", icon: MessageSquare },
+  { href: "/projects", label: "Proyek", icon: FolderKanban },
+  { href: "/jobs", label: "Cari Kerja", icon: Briefcase },
+  { href: "/chat/research", label: "Riset Web", icon: Globe },
+];
 
 function chatModeFromHref(href: string): string | null {
   const segment = href.startsWith("/chat/") ? href.slice("/chat/".length) : "";
@@ -104,7 +113,10 @@ export function MenuOrchestrator({
           } else if (action.type === "set_theme" && action.theme) {
             applyTheme(action.theme);
           } else if (action.type === "save_memory" && action.content) {
-            void createMemory({ content: action.content });
+            void createMemory({
+              content: action.content,
+              type: action.memory_type,
+            });
           }
         }
 
@@ -149,8 +161,27 @@ export function MenuOrchestrator({
                 />
                 <div>
                   <h1 className="text-2xl font-semibold tracking-tight">Axtra</h1>
-                  <p className="text-[13px] text-muted">Orchestrator</p>
+                  <p className="text-[13px] text-muted">Agen AI personal</p>
                 </div>
+              </div>
+              <p className="mt-4 max-w-lg text-[14px] leading-relaxed text-muted">
+                Mulai percakapan, kelola proyek, atau cari kerja. Tulis tujuanmu di kolom
+                bawah dan Axtra akan mengarahkan ke tool yang tepat.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {SHORTCUTS.map((shortcut) => {
+                  const Icon = shortcut.icon;
+                  return (
+                    <Link
+                      key={shortcut.href}
+                      href={shortcut.href}
+                      className="inline-flex items-center gap-2 rounded-full border border-border px-3 py-1.5 text-[13px] text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+                    >
+                      <Icon size={14} aria-hidden />
+                      {shortcut.label}
+                    </Link>
+                  );
+                })}
               </div>
               <div className="mt-6">
                 <AssistantDigest embedded />
@@ -161,7 +192,7 @@ export function MenuOrchestrator({
               {messages.map((line, index) =>
                 line.role === "user" ? (
                   <div key={index} className="flex justify-end">
-                    <p className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-surface-muted px-3.5 py-2 text-[13px] leading-relaxed text-foreground">
+                    <p className="max-w-[85%] whitespace-pre-wrap rounded-2xl bg-surface-muted px-3.5 py-2 text-[14px] leading-relaxed text-foreground">
                       {line.content}
                     </p>
                   </div>
@@ -174,7 +205,7 @@ export function MenuOrchestrator({
                       height={24}
                       className="mt-0.5 h-6 w-6 shrink-0 rounded-md"
                     />
-                    <p className="min-w-0 whitespace-pre-wrap text-[13px] leading-relaxed text-foreground">
+                    <p className="min-w-0 whitespace-pre-wrap text-[14px] leading-relaxed text-foreground">
                       {line.content}
                     </p>
                   </div>
@@ -232,7 +263,7 @@ export function MenuOrchestrator({
               }}
               rows={1}
               placeholder="Tulis tujuanmu ke tool atau menu..."
-              className="max-h-32 min-h-7 flex-1 resize-none bg-transparent py-1 text-[13px] outline-none placeholder:text-muted"
+              className="max-h-32 min-h-7 flex-1 resize-none bg-transparent py-1 text-[14px] outline-none placeholder:text-muted"
             />
             <button
               type="submit"

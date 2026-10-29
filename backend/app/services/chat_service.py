@@ -176,7 +176,18 @@ class ChatService:
         memories: list[MemoryOut] = []
         if use_memory and memory_service and user_message.strip():
             try:
-                memories = await memory_service.retrieve(user_id, user_message)
+                if self._settings.memory_scope_by_mode and mode:
+                    # Fetch extra candidates, then keep same-mode + unscoped ones.
+                    candidates = await memory_service.retrieve(
+                        user_id, user_message, limit=self._settings.memory_retrieval_count * 3
+                    )
+                    memories = [
+                        memory
+                        for memory in candidates
+                        if (memory.metadata or {}).get("mode") in (None, mode)
+                    ][: self._settings.memory_retrieval_count]
+                else:
+                    memories = await memory_service.retrieve(user_id, user_message)
             except Exception:
                 memories = []
 
@@ -563,6 +574,7 @@ class ChatService:
                         display_content,
                         recent_context,
                         [bundle["project"].id for bundle in context.project_bundles],
+                        mode=mode,
                     )
                     if saved:
                         yield await _emit("memory", {"saved": saved})
@@ -678,6 +690,7 @@ class ChatService:
         user_message: str,
         recent_context: str = "",
         project_ids: list[str] | None = None,
+        mode: str | None = None,
     ) -> list[dict[str, str]]:
         """Post-response memory extraction run.
 
@@ -697,19 +710,31 @@ class ChatService:
         )
         await record_usage(client, user_id, model, usage, source="memory")
 
-        saved: list[dict[str, str]] = []
+        saved: list[dict[str, Any]] = []
         for item in extracted:
-            if await memory_service.exists_active(user_id, item.content):
-                continue
-            memory = await memory_service.create(
+            memory, action = await memory_service.upsert_fact(
                 user_id,
                 type_=item.type,
                 content=item.content,
                 source="chat",
-                source_ref={"conversation_id": conversation_id},
+                source_ref={
+                    "conversation_id": conversation_id,
+                    **({"mode": mode} if mode else {}),
+                },
+                metadata={"mode": mode} if mode else None,
                 confidence=item.confidence,
             )
-            saved.append({"id": memory.id, "type": memory.type, "content": memory.content})
+            if action == "skipped":
+                continue
+            saved.append(
+                {
+                    "id": memory.id,
+                    "type": memory.type,
+                    "content": memory.content,
+                    "mode": mode,
+                    "action": action,
+                }
+            )
             # Project memories also feed the Proyek page (best-effort; a
             # failure here must not drop the memory that was just saved).
             if item.type == "project":

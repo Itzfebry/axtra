@@ -16,11 +16,14 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
 import { Markdown } from "@/components/Markdown";
 import {
   fetchChatSettings,
   listJobs,
   listProjects,
+  saveResearchSourceToMemory,
   type ChatCommand,
   type ChatModeId,
   type JobApplication,
@@ -77,6 +80,9 @@ export function ChatPanel({
 
   // Riset Web: the URL the user wants to crawl next.
   const [urlInput, setUrlInput] = useState("");
+  // Riset Web: per-source "save to memory" feedback.
+  const [savingSourceId, setSavingSourceId] = useState<string | null>(null);
+  const [sourceNotice, setSourceNotice] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -97,6 +103,25 @@ export function ChatPanel({
   const modeConfig = getChatMode(mode);
   const ModeIcon = modeConfig.icon;
 
+  async function handleSaveSource(sourceId: string) {
+    setSavingSourceId(sourceId);
+    setSourceNotice(null);
+    try {
+      const saved = await saveResearchSourceToMemory(sourceId);
+      setSourceNotice(
+        saved.length > 0
+          ? `${saved.length} memori disimpan atau diperbarui.`
+          : "Tidak ada fakta baru untuk disimpan.",
+      );
+    } catch (error) {
+      setSourceNotice(
+        error instanceof Error ? error.message : "Gagal menyimpan ke memori.",
+      );
+    } finally {
+      setSavingSourceId(null);
+    }
+  }
+
   // Switching conversations reuses this component (no remount), so drop the
   // per-thread composer state: mention chips and the crawl URL must not leak
   // into the next thread.
@@ -109,6 +134,7 @@ export function ChatPanel({
 
   const sliceReady = Boolean(slice);
   const sliceLoading = slice?.loading ?? false;
+  const showLoading = useDelayedFlag(sliceLoading);
   const sliceSending = slice?.sending ?? false;
 
   // Auto-send a prompt handed off by the homepage orchestrator.
@@ -391,7 +417,7 @@ export function ChatPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b border-border px-4">
-        <span className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted">
+        <span className="inline-flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] uppercase tracking-wide text-muted">
           <ModeIcon size={11} aria-hidden />
           {modeConfig.label}
         </span>
@@ -402,7 +428,9 @@ export function ChatPanel({
 
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl px-4 py-6">
-          {slice.loading && <p className="text-[13px] text-muted">Memuat percakapan...</p>}
+          {showLoading && (
+            <LoadingState label="Memuat percakapan..." variant="chat" />
+          )}
 
           {showEmpty && (
             <div className="flex min-h-[45vh] flex-col items-center justify-center text-center">
@@ -410,7 +438,7 @@ export function ChatPanel({
                 <ModeIcon size={20} aria-hidden />
               </span>
               <h2 className="text-2xl font-semibold tracking-tight">{modeConfig.label}</h2>
-              <p className="mt-2 max-w-md text-[13px] text-muted">{modeConfig.description}</p>
+              <p className="mt-2 max-w-md text-[14px] text-muted">{modeConfig.description}</p>
               <ul className="mt-6 grid w-full max-w-xl gap-2 sm:grid-cols-2">
                 {modeConfig.suggestions.map((suggestion) => (
                   <li key={suggestion}>
@@ -443,7 +471,7 @@ export function ChatPanel({
                 {message.role === "user" ? (
                   <div className="flex flex-col items-end gap-1">
                     {message.command && (
-                      <span className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted">
+                      <span className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">
                         <Terminal size={11} aria-hidden />/{message.command}
                       </span>
                     )}
@@ -498,7 +526,13 @@ export function ChatPanel({
           {slice.memorySaved && slice.memorySaved.length > 0 && (
             <div className="mt-4 flex items-start gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-[12px] text-muted">
               <Brain size={14} className="mt-0.5 shrink-0" aria-hidden />
-              <span>Disimpan ke memori: {slice.memorySaved.join(" · ")}</span>
+              <span>
+                Disimpan ke memori dari{" "}
+                <span className="font-medium text-foreground">
+                  Chat · {modeConfig.label}
+                </span>
+                : {slice.memorySaved.join(" · ")}
+              </span>
             </div>
           )}
 
@@ -553,7 +587,7 @@ export function ChatPanel({
                   >
                     <div className="min-w-0">
                       <p className="truncate text-[12px] text-foreground">{document.filename}</p>
-                      <p className="text-[10px] text-muted">
+                      <p className="text-[11px] text-muted">
                         {formatBytes(document.size_bytes)} · teks tersimpan
                       </p>
                     </div>
@@ -627,19 +661,35 @@ export function ChatPanel({
                       <p className="truncate text-[12px] text-foreground">
                         {source.title || source.url}
                       </p>
-                      <p className="truncate text-[10px] text-muted">
+                      <p className="truncate text-[11px] text-muted">
                         {source.site} · {source.char_count} karakter
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      aria-label={`Hapus sumber ${source.title || source.url}`}
-                      title="Hapus sumber"
-                      onClick={() => activeKey && void removeSource(activeKey, source.id)}
-                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
-                    >
-                      <Trash2 size={14} aria-hidden />
-                    </button>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        aria-label={`Simpan memori dari ${source.title || source.url}`}
+                        title="Simpan ke memori"
+                        disabled={savingSourceId === source.id}
+                        onClick={() => void handleSaveSource(source.id)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground disabled:opacity-50"
+                      >
+                        {savingSourceId === source.id ? (
+                          <Loader2 size={14} className="animate-spin" aria-hidden />
+                        ) : (
+                          <Brain size={14} aria-hidden />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Hapus sumber ${source.title || source.url}`}
+                        title="Hapus sumber"
+                        onClick={() => activeKey && void removeSource(activeKey, source.id)}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+                      >
+                        <Trash2 size={14} aria-hidden />
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -649,9 +699,21 @@ export function ChatPanel({
               </p>
             )}
 
+            {sourceNotice && (
+              <p role="status" className="mt-2 text-[11px] text-muted">
+                {sourceNotice}
+              </p>
+            )}
+
             {slice.crawlError && (
               <p role="alert" className="mt-2 text-[11px] text-danger">
                 {slice.crawlError}
+              </p>
+            )}
+
+            {!slice.crawlError && slice.crawlNotice && (
+              <p role="status" className="mt-2 text-[11px] text-muted">
+                {slice.crawlNotice}
               </p>
             )}
           </div>

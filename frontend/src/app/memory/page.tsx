@@ -3,6 +3,9 @@
 import { Combine, Plus, Search, Trash2, Pencil, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { LoadingState } from "@/components/ui/LoadingState";
+import { useDelayedFlag } from "@/lib/useDelayedFlag";
+import { getChatMode } from "@/lib/chatModes";
 import {
   apiFetch,
   fetchMemoryClusters,
@@ -24,6 +27,7 @@ type Memory = {
   type: MemoryType;
   content: string;
   source: string;
+  source_ref?: Record<string, unknown> | null;
   confidence: number;
   status: "active" | "conflicted" | "archived";
   created_at: string | null;
@@ -54,6 +58,7 @@ export default function MemoryPage() {
   const [filter, setFilter] = useState<MemoryType | "">("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const showLoading = useDelayedFlag(loading);
   const [error, setError] = useState<string | null>(null);
 
   const [showForm, setShowForm] = useState(false);
@@ -211,7 +216,7 @@ export default function MemoryPage() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">Memori</h1>
-              <p className="mt-1 text-[13px] text-muted">
+              <p className="mt-1 text-[14px] text-muted">
                 Semua fakta yang Axtra ingat. Periksa, koreksi, atau hapus kapan pun.
               </p>
             </div>
@@ -413,10 +418,12 @@ export default function MemoryPage() {
           )}
 
           <div className="mt-4">
-            {loading && <p className="text-[13px] text-muted">Memuat…</p>}
+            {showLoading && (
+              <LoadingState label="Memuat memori..." variant="list" rows={5} />
+            )}
 
             {!loading && memories.length === 0 && !error && (
-              <div className="rounded-lg border border-border px-4 py-6 text-center text-[13px] text-muted">
+              <div className="rounded-lg border border-border px-4 py-6 text-center text-[14px] text-muted">
                 Belum ada memori. Mulai dari chat, atau tambah manual.
               </div>
             )}
@@ -442,6 +449,11 @@ export default function MemoryPage() {
                         </span>
                       )}
                       <span>sumber: {memory.source}</span>
+                      {typeof memory.source_ref?.mode === "string" && (
+                        <span className="rounded border border-border px-1.5 py-0.5">
+                          {getChatMode(memory.source_ref.mode).label}
+                        </span>
+                      )}
                       {memory.created_at && (
                         <span>· {new Date(memory.created_at).toLocaleString("id-ID")}</span>
                       )}

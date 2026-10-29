@@ -58,6 +58,12 @@ async def create_memory(
     payload: MemoryCreate, user: CurrentUser = Depends(rate_limit)
 ) -> MemoryOut:
     memory_service = build_memory_service(user.client)
+    # The orchestrator saves facts opportunistically; never create a duplicate of
+    # an existing active memory with the same content.
+    if payload.source == "orchestrator":
+        existing = await memory_service.find_active_by_content(user.id, payload.content)
+        if existing is not None:
+            return existing
     return await memory_service.create(
         user.id,
         type_=payload.type,
