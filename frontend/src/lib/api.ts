@@ -161,9 +161,514 @@ export async function deleteConversation(conversationId: string): Promise<void> 
 }
 
 // ---------------------------------------------------------------------------
+// Web research (Riset Web chat mode: crawl a URL into the conversation context)
+// ---------------------------------------------------------------------------
+export type ResearchSource = {
+  id: string;
+  conversation_id: string;
+  url: string;
+  title: string;
+  site: string;
+  excerpt: string;
+  char_count: number;
+  created_at: string | null;
+};
+
+export async function crawlUrl(
+  url: string,
+  conversationId: string | null,
+): Promise<ResearchSource> {
+  return apiFetch<ResearchSource>("/research/crawl", {
+    method: "POST",
+    body: JSON.stringify({ url, conversation_id: conversationId }),
+  });
+}
+
+export async function listResearchSources(
+  conversationId: string,
+): Promise<ResearchSource[]> {
+  return apiFetch<ResearchSource[]>(
+    `/research/sources?conversation_id=${encodeURIComponent(conversationId)}`,
+  );
+}
+
+export async function deleteResearchSource(sourceId: string): Promise<void> {
+  await apiFetch<void>(`/research/sources/${sourceId}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Cari Kerja (job application tracker + CV matching)
+// ---------------------------------------------------------------------------
+export type JobStatus =
+  | "draft"
+  | "applied"
+  | "screening"
+  | "interview"
+  | "offer"
+  | "rejected"
+  | "withdrawn";
+
+export type JobApplication = {
+  id: string;
+  company: string;
+  role: string;
+  location: string;
+  work_type: string;
+  salary: string;
+  job_url: string | null;
+  source: string;
+  status: JobStatus;
+  applied_at: string | null;
+  deadline: string | null;
+  notes: string;
+  job_description: string;
+  job_title: string;
+  predicted_jobdesk: string;
+  match_score: number | null;
+  match_analysis: string;
+  success_score: number | null;
+  success_analysis: string;
+  cover_letter: string;
+  analyzed_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type JobApplicationInput = {
+  company: string;
+  role: string;
+  location?: string;
+  work_type?: string;
+  salary?: string;
+  job_url?: string | null;
+  status?: JobStatus;
+  applied_at?: string | null;
+  deadline?: string | null;
+  created_at?: string | null;
+  notes?: string;
+  job_description?: string;
+};
+
+export type JobCv = {
+  filename: string;
+  summary: string;
+  char_count: number;
+  updated_at: string | null;
+};
+
+export async function listJobs(params?: {
+  status?: JobStatus;
+  search?: string;
+}): Promise<JobApplication[]> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.search?.trim()) query.set("search", params.search.trim());
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return apiFetch<JobApplication[]>(`/jobs${suffix}`);
+}
+
+export async function getJob(id: string): Promise<JobApplication> {
+  return apiFetch<JobApplication>(`/jobs/${id}`);
+}
+
+export async function createJob(
+  input: JobApplicationInput,
+): Promise<JobApplication> {
+  return apiFetch<JobApplication>("/jobs", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateJob(
+  id: string,
+  patch: Partial<JobApplicationInput> & { cover_letter?: string },
+): Promise<JobApplication> {
+  return apiFetch<JobApplication>(`/jobs/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteJob(id: string): Promise<void> {
+  await apiFetch<void>(`/jobs/${id}`, { method: "DELETE" });
+}
+
+export async function getJobCv(): Promise<JobCv> {
+  return apiFetch<JobCv>("/jobs/cv");
+}
+
+export async function uploadJobCv(file: File): Promise<JobCv> {
+  const form = new FormData();
+  form.append("file", file);
+
+  const response = await fetch(`${API_BASE}/jobs/cv`, {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+
+  if (response.status === 401) {
+    redirectToLogin();
+    throw new ApiError(401, "Sesi tidak valid. Silakan login ulang.");
+  }
+
+  const text = await response.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    const detail =
+      (data as { detail?: string } | null)?.detail ??
+      `Upload CV gagal (${response.status}).`;
+    throw new ApiError(response.status, detail);
+  }
+  return data as JobCv;
+}
+
+export async function deleteJobCv(): Promise<void> {
+  await apiFetch<void>("/jobs/cv", { method: "DELETE" });
+}
+
+export async function crawlJob(
+  id: string,
+  url?: string,
+): Promise<JobApplication> {
+  return apiFetch<JobApplication>(`/jobs/${id}/crawl`, {
+    method: "POST",
+    body: JSON.stringify({ url: url?.trim() || null }),
+  });
+}
+
+export async function analyzeJob(id: string): Promise<JobApplication> {
+  return apiFetch<JobApplication>(`/jobs/${id}/analyze`, { method: "POST" });
+}
+
+export async function generateCoverLetter(id: string): Promise<JobApplication> {
+  return apiFetch<JobApplication>(`/jobs/${id}/cover-letter`, { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// Projects (Phase 2 project registry)
+// ---------------------------------------------------------------------------
+export type ProjectStatus = "idea" | "active" | "paused" | "done";
+
+export type Project = {
+  id: string;
+  name: string;
+  description: string;
+  status: ProjectStatus;
+  tech_stack: string[];
+  repo_url: string | null;
+  notes: string;
+  source: string;
+  source_ref: Record<string, unknown>;
+  repo_full_name: string | null;
+  repo_branch: string | null;
+  repo_index_status: "none" | "pending" | "indexing" | "ready" | "error";
+  repo_file_count: number;
+  repo_chunk_count: number;
+  repo_summary: string | null;
+  repo_index_error: string | null;
+  repo_index_progress: number;
+  repo_index_stage: string | null;
+  repo_indexed_at: string | null;
+  health_summary: string | null;
+  health_generated_at: string | null;
+  health_stale: boolean;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type ProjectInput = {
+  name: string;
+  description?: string;
+  status?: ProjectStatus;
+  tech_stack?: string[];
+  repo_url?: string | null;
+  notes?: string;
+};
+
+export async function listProjects(params?: {
+  status?: ProjectStatus;
+  search?: string;
+}): Promise<Project[]> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status_", params.status);
+  if (params?.search?.trim()) query.set("search", params.search.trim());
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return apiFetch<Project[]>(`/projects${suffix}`);
+}
+
+export async function createProject(input: ProjectInput): Promise<Project> {
+  return apiFetch<Project>("/projects", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateProject(
+  id: string,
+  patch: Partial<ProjectInput>,
+): Promise<Project> {
+  return apiFetch<Project>(`/projects/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteProject(id: string): Promise<void> {
+  await apiFetch<void>(`/projects/${id}`, { method: "DELETE" });
+}
+
+export async function getProject(id: string): Promise<Project> {
+  return apiFetch<Project>(`/projects/${id}`);
+}
+
+export type RepoFile = {
+  path: string;
+  language: string;
+  chunk_count: number;
+};
+
+export type RepoFileContent = {
+  path: string;
+  language: string;
+  content: string;
+};
+
+export async function listProjectFiles(id: string): Promise<RepoFile[]> {
+  return apiFetch<RepoFile[]>(`/projects/${id}/files`);
+}
+
+export async function getProjectFile(
+  id: string,
+  path: string,
+): Promise<RepoFileContent> {
+  return apiFetch<RepoFileContent>(
+    `/projects/${id}/files/content?path=${encodeURIComponent(path)}`,
+  );
+}
+
+export type RepoAskResult = {
+  answer: string;
+  sources: { path: string; language: string; snippet: string; score: number | null }[];
+  ask_id?: string | null;
+};
+
+export async function indexProjectRepo(id: string): Promise<Project> {
+  return apiFetch<Project>(`/projects/${id}/repo/index`, { method: "POST" });
+}
+
+export async function clearProjectRepo(id: string): Promise<Project> {
+  return apiFetch<Project>(`/projects/${id}/repo`, { method: "DELETE" });
+}
+
+export async function askProjectRepo(
+  id: string,
+  question: string,
+): Promise<RepoAskResult> {
+  return apiFetch<RepoAskResult>(`/projects/${id}/repo/ask`, {
+    method: "POST",
+    body: JSON.stringify({ question }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Project asks (persisted "Tanya repo" history for the right sidebar)
+// ---------------------------------------------------------------------------
+export type ProjectAsk = {
+  id: string;
+  project_id: string;
+  question: string;
+  answer: string;
+  sources: { path: string; language: string; snippet: string; score: number | null }[];
+  error: string | null;
+  created_at: string | null;
+};
+
+export async function listProjectAsks(id: string): Promise<ProjectAsk[]> {
+  return apiFetch<ProjectAsk[]>(`/projects/${id}/asks`);
+}
+
+export async function deleteProjectAsk(id: string, askId: string): Promise<void> {
+  await apiFetch<void>(`/projects/${id}/asks/${askId}`, { method: "DELETE" });
+}
+
+export async function clearProjectAsks(id: string): Promise<void> {
+  await apiFetch<void>(`/projects/${id}/asks`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Project tasks (per-project todos)
+// ---------------------------------------------------------------------------
+export type ProjectTaskStatus = "todo" | "doing" | "done";
+export type ProjectTaskPriority = "low" | "medium" | "high";
+
+export type ProjectTask = {
+  id: string;
+  project_id: string;
+  title: string;
+  detail: string;
+  status: ProjectTaskStatus;
+  priority: ProjectTaskPriority;
+  source: string;
+  position: number;
+  created_at: string | null;
+  updated_at: string | null;
+  completed_at: string | null;
+};
+
+export async function listProjectTasks(id: string): Promise<ProjectTask[]> {
+  return apiFetch<ProjectTask[]>(`/projects/${id}/tasks`);
+}
+
+export async function createProjectTask(
+  id: string,
+  input: {
+    title: string;
+    detail?: string;
+    status?: ProjectTaskStatus;
+    priority?: ProjectTaskPriority;
+  },
+): Promise<ProjectTask> {
+  return apiFetch<ProjectTask>(`/projects/${id}/tasks`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateProjectTask(
+  id: string,
+  taskId: string,
+  patch: Partial<{
+    title: string;
+    detail: string;
+    status: ProjectTaskStatus;
+    priority: ProjectTaskPriority;
+  }>,
+): Promise<ProjectTask> {
+  return apiFetch<ProjectTask>(`/projects/${id}/tasks/${taskId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteProjectTask(id: string, taskId: string): Promise<void> {
+  await apiFetch<void>(`/projects/${id}/tasks/${taskId}`, { method: "DELETE" });
+}
+
+export async function reorderProjectTasks(
+  id: string,
+  items: { id: string; status: ProjectTaskStatus; position: number }[],
+): Promise<ProjectTask[]> {
+  return apiFetch<ProjectTask[]>(`/projects/${id}/tasks/reorder`, {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Project health (AI review cached on the project)
+// ---------------------------------------------------------------------------
+export async function analyzeProjectHealth(id: string): Promise<Project> {
+  return apiFetch<Project>(`/projects/${id}/health`, { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// Project conversations (chat threads linked to a project via @mention)
+// ---------------------------------------------------------------------------
+export type ProjectConversation = {
+  conversation_id: string;
+  title: string | null;
+  mode: string;
+  message_count: number;
+  created_at: string | null;
+  last_message_at: string | null;
+  linked_at: string | null;
+};
+
+export async function listProjectConversations(
+  id: string,
+): Promise<ProjectConversation[]> {
+  return apiFetch<ProjectConversation[]>(`/projects/${id}/conversations`);
+}
+
+// ---------------------------------------------------------------------------
+// Project documents & links (non-repo project data)
+// ---------------------------------------------------------------------------
+export type ProjectDocumentKind = "note" | "link";
+
+export type ProjectDocument = {
+  id: string;
+  project_id: string;
+  title: string;
+  kind: ProjectDocumentKind;
+  url: string | null;
+  content: string;
+  source: string;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export async function listProjectDocuments(
+  id: string,
+): Promise<ProjectDocument[]> {
+  return apiFetch<ProjectDocument[]>(`/projects/${id}/documents`);
+}
+
+export async function createProjectDocument(
+  id: string,
+  input: {
+    title?: string;
+    kind?: ProjectDocumentKind;
+    url?: string | null;
+    content?: string;
+  },
+): Promise<ProjectDocument> {
+  return apiFetch<ProjectDocument>(`/projects/${id}/documents`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateProjectDocument(
+  id: string,
+  documentId: string,
+  patch: Partial<{
+    title: string;
+    kind: ProjectDocumentKind;
+    url: string | null;
+    content: string;
+  }>,
+): Promise<ProjectDocument> {
+  return apiFetch<ProjectDocument>(`/projects/${id}/documents/${documentId}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteProjectDocument(
+  id: string,
+  documentId: string,
+): Promise<void> {
+  await apiFetch<void>(`/projects/${id}/documents/${documentId}`, {
+    method: "DELETE",
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Chat mode settings (role, behavior, slash commands)
 // ---------------------------------------------------------------------------
-export type ChatModeId = "general" | "curhat" | "brainstorming" | "document";
+export type ChatModeId =
+  | "general"
+  | "curhat"
+  | "brainstorming"
+  | "document"
+  | "research";
 
 export type ModeRolePreset = {
   id: string;

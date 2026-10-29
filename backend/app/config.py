@@ -8,7 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Root .env is a fallback; backend/.env wins when both define a key.
+        env_file=("../.env", ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
@@ -47,12 +48,35 @@ class Settings(BaseSettings):
     memory_cluster_similarity: float = 0.82
     memory_extraction_enabled: bool = True
 
+    # GitHub repository indexing (RAG over project code)
+    # Token is optional; without it only public repos are readable (60 req/h).
+    github_token: str = ""
+    github_api_base: str = "https://api.github.com"
+    github_raw_base: str = "https://raw.githubusercontent.com"
+    repo_index_max_files: int = 300
+    repo_index_max_file_bytes: int = 200000
+    repo_index_max_chunks: int = 4000
+    repo_index_chunk_chars: int = 1200
+    repo_index_chunk_overlap: int = 200
+    repo_qa_context_chunks: int = 8
+
+    # Project AI health auto-refresh: when project data changes, mark the cached
+    # summary stale and regenerate it in the background after a short debounce.
+    project_health_auto_refresh: bool = True
+    project_health_debounce_seconds: float = 12.0
+
     # Guardrails
     max_context_messages: int = 20
     rate_limit_per_minute: int = 30
     read_rate_limit_per_minute: int = 300
     max_upload_bytes: int = 10 * 1024 * 1024
     max_document_chars: int = 12000
+
+    # Web research (Riset Web): crawl pages into a conversation's context.
+    research_max_chars: int = 12000
+    research_max_sources: int = 5
+    research_fetch_timeout: float = 15.0
+    research_max_bytes: int = 2 * 1024 * 1024
 
     # Token usage display (denominators for the navbar/sidebar meters).
     # Set to 0 to hide the corresponding limit/percentage.

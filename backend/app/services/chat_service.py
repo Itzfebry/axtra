@@ -17,17 +17,28 @@ from app.config import Settings
 from app.llm import ChatMessage, ChatRequest, GroqProvider, LLMProvider
 from app.prompts import (
     DOCUMENT_CONTEXT_HEADER,
+    JOB_CONTEXT_HEADER,
     MEMORY_CONTEXT_HEADER,
     MODE_PROMPTS,
+    PROJECT_CONTEXT_HEADER,
+    RESEARCH_CONTEXT_HEADER,
     SYSTEM_PROMPT,
 )
 from app.schemas import MemoryOut
 from app.services.memory_extraction import MemoryExtractor
 from app.services.memory_service import MemoryService
+from app.services.project_service import ProjectService
 from app.services.usage_service import record_usage
 
 
 _OPTIONS_BLOCK = re.compile(r"```\s*options\s*(.*?)(?:```|$)", re.IGNORECASE | re.DOTALL)
+
+
+def _clip(text: str | None, limit: int) -> str:
+    value = (text or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "..."
 
 
 def _parse_options(raw: str) -> list[str]:
@@ -86,6 +97,9 @@ class ConversationContext:
     history: list[dict[str, Any]]
     memories: list[MemoryOut]
     documents: list[dict[str, Any]]
+    research_sources: list[dict[str, Any]]
+    project_bundles: list[dict[str, Any]]
+    job_bundles: list[dict[str, Any]]
 
 
 class ConversationNotFound(Exception):
@@ -141,6 +155,8 @@ class ChatService:
         user_message: str,
         use_memory: bool,
         memory_service: MemoryService | None,
+        project_ids: list[str] | None = None,
+        job_ids: list[str] | None = None,
     ) -> ConversationContext:
         history_query = (
             client.table("messages")
@@ -176,6 +192,51 @@ class ChatService:
             )
             documents = doc_response.data or []
 
+        # Crawled pages are scoped to one conversation and only used in research mode.
+        research_sources: list[dict[str, Any]] = []
+        if mode == "research":
+            source_response = await (
+                client.table("research_sources")
+                .select("url, title, site, content")
+                .eq("conversation_id", conversation_id)
+                .order("created_at")
+                .execute()
+            )
+            research_sources = source_response.data or []
+
+        # @mentioned projects are loaded with their open tasks for grounding.
+        project_bundles: list[dict[str, Any]] = []
+        if project_ids:
+            try:
+                project_bundles = await ProjectService(client).context_bundles(
+                    user_id, project_ids
+                )
+            except Exception:  # noqa: BLE001 - project context is best-effort
+                project_bundles = []
+
+        # @mentioned job applications bring their tracker data into the reply.
+        job_bundles: list[dict[str, Any]] = []
+        if job_ids:
+            try:
+                job_response = await (
+                    client.table("job_applications")
+                    .select(
+                        "id, company, role, location, work_type, salary, status, "
+                        "applied_at, deadline, job_url, notes, job_description, "
+                        "predicted_jobdesk, match_score, match_analysis, "
+                        "success_score, success_analysis, cover_letter, analyzed_at, "
+                        "created_at"
+                    )
+                    .eq("user_id", user_id)
+                    .in_("id", job_ids[:5])
+                    .execute()
+                )
+                rows = job_response.data or []
+                by_id = {row.get("id"): row for row in rows}
+                job_bundles = [by_id[job_id] for job_id in job_ids if job_id in by_id]
+            except Exception:  # noqa: BLE001 - job context is best-effort
+                job_bundles = []
+
         return ConversationContext(
             conversation_id=conversation_id,
             mode=mode,
@@ -184,6 +245,9 @@ class ChatService:
             history=history,
             memories=memories,
             documents=documents,
+            research_sources=research_sources,
+            project_bundles=project_bundles,
+            job_bundles=job_bundles,
         )
 
     def _build_messages(
@@ -245,6 +309,101 @@ class ChatService:
             if doc_blocks:
                 parts.append(DOCUMENT_CONTEXT_HEADER + "\n" + "\n\n".join(doc_blocks))
 
+        if context.research_sources:
+            source_blocks: list[str] = []
+            remaining = self._settings.research_max_chars
+            for index, source in enumerate(context.research_sources, start=1):
+                if remaining <= 0:
+                    break
+                text = (source.get("content") or "").strip()
+                if not text:
+                    continue
+                snippet = text[:remaining]
+                remaining -= len(snippet)
+                label = source.get("title") or source.get("site") or "sumber"
+                url = source.get("url") or ""
+                source_blocks.append(
+                    f"--- Sumber {index}: {label} ({url}) ---\n{snippet}"
+                )
+            if source_blocks:
+                parts.append(RESEARCH_CONTEXT_HEADER + "\n" + "\n\n".join(source_blocks))
+
+        if context.project_bundles:
+            project_blocks: list[str] = []
+            for bundle in context.project_bundles:
+                project = bundle["project"]
+                lines = [
+                    f"### {project.name} (status: {project.status})",
+                    f"- Deskripsi: {_clip(project.description, 600) or '(kosong)'}",
+                    f"- Tech: {', '.join(project.tech_stack) or '(belum diisi)'}",
+                ]
+                if project.notes:
+                    lines.append(f"- Catatan: {_clip(project.notes, 800)}")
+                if project.repo_summary:
+                    lines.append(f"- Ringkasan repo: {_clip(project.repo_summary, 1200)}")
+                open_tasks = bundle.get("open_tasks") or []
+                if open_tasks:
+                    lines.append(
+                        "- Tugas terbuka: "
+                        + "; ".join(task.title for task in open_tasks)
+                    )
+                if bundle.get("done_count"):
+                    lines.append(f"- Tugas selesai: {bundle['done_count']}")
+                documents = bundle.get("documents") or []
+                if documents:
+                    doc_lines: list[str] = []
+                    remaining = 1500
+                    for document in documents[:8]:
+                        if remaining <= 0:
+                            break
+                        label = document.title or "(tanpa judul)"
+                        body = (
+                            document.url
+                            if document.kind == "link"
+                            else _clip(document.content, min(remaining, 400))
+                        )
+                        line = f"  - [{document.kind}] {label}: {body or '(kosong)'}"
+                        doc_lines.append(line)
+                        remaining -= len(line)
+                    lines.append("- Data non-repo:\n" + "\n".join(doc_lines))
+                lines.append(
+                    "- Ringkasan AI: "
+                    + (_clip(project.health_summary, 1500) or "(belum ada)")
+                )
+                project_blocks.append("\n".join(lines))
+            parts.append(PROJECT_CONTEXT_HEADER + "\n" + "\n\n".join(project_blocks))
+
+        if context.job_bundles:
+            job_blocks: list[str] = []
+            for job in context.job_bundles:
+                lines = [
+                    f"### {job.get('role') or '(tanpa posisi)'} — "
+                    f"{job.get('company') or '(tanpa perusahaan)'} "
+                    f"(status: {job.get('status') or 'applied'})",
+                    f"- Lokasi: {job.get('location') or '(tidak disebut)'}",
+                    f"- Tipe kerja: {job.get('work_type') or '(tidak disebut)'}",
+                    f"- Gaji: {job.get('salary') or '(tidak disebut)'}",
+                    f"- Dibuat: {str(job.get('created_at') or '')[:10] or '(tidak diketahui)'}",
+                    f"- Dilamar: {str(job.get('applied_at') or '')[:10] or '(belum ditandai)'}",
+                    f"- Deadline: {job.get('deadline') or '(tidak ada)'}",
+                    f"- URL: {job.get('job_url') or '(tidak ada)'}",
+                    f"- Catatan: {_clip(job.get('notes'), 800) or '(kosong)'}",
+                    f"- Match CV: {job.get('match_score') if job.get('match_score') is not None else '(belum dianalisa)'}",
+                    f"- Peluang berhasil: {job.get('success_score') if job.get('success_score') is not None else '(belum dianalisa)'}",
+                    "- Prediksi jobdesk: "
+                    + (_clip(job.get("predicted_jobdesk"), 1200) or "(belum ada)"),
+                    "- Analisa kecocokan: "
+                    + (_clip(job.get("match_analysis"), 1200) or "(belum ada)"),
+                    "- Analisa peluang: "
+                    + (_clip(job.get("success_analysis"), 1200) or "(belum ada)"),
+                    "- Deskripsi lowongan: "
+                    + (_clip(job.get("job_description"), 2000) or "(belum ada)"),
+                    "- Cover letter tersimpan: "
+                    + (_clip(job.get("cover_letter"), 1500) or "(belum ada)"),
+                ]
+                job_blocks.append("\n".join(lines))
+            parts.append(JOB_CONTEXT_HEADER + "\n" + "\n\n".join(job_blocks))
+
         command_instruction = resolve_command(context.mode, command)
         if command_instruction:
             parts.append(command_instruction)
@@ -271,6 +430,8 @@ class ChatService:
         temperature: float = 0.7,
         mode: str = "general",
         command: str | None = None,
+        project_ids: list[str] | None = None,
+        job_ids: list[str] | None = None,
     ) -> AsyncIterator[dict[str, str]]:
         """Yield SSE-ready events for a chat turn (meta, token, done, memory, error)."""
         started = time.monotonic()
@@ -299,6 +460,8 @@ class ChatService:
                 prompt_content,
                 use_memory,
                 memory_service,
+                project_ids,
+                job_ids,
             )
 
             messages = self._build_messages(context, command)
@@ -337,6 +500,18 @@ class ChatService:
                 raise LLMProviderError("Model tidak mengembalikan respons.")
 
             try:
+                project_refs = [
+                    {"id": bundle["project"].id, "name": bundle["project"].name}
+                    for bundle in context.project_bundles
+                ]
+                job_refs = [
+                    {
+                        "id": job.get("id"),
+                        "name": f"{job.get('role') or ''} — {job.get('company') or ''}".strip(" —"),
+                    }
+                    for job in context.job_bundles
+                    if job.get("id")
+                ]
                 await self._persist_turn(
                     client,
                     user_id,
@@ -347,6 +522,8 @@ class ChatService:
                     usage,
                     options,
                     command,
+                    project_refs,
+                    job_refs,
                 )
             except Exception as exc:  # noqa: BLE001 - never break the stream
                 yield await _emit("warning", {"detail": f"Gagal menyimpan percakapan: {exc}"})
@@ -385,6 +562,7 @@ class ChatService:
                         conversation_id,
                         display_content,
                         recent_context,
+                        [bundle["project"].id for bundle in context.project_bundles],
                     )
                     if saved:
                         yield await _emit("memory", {"saved": saved})
@@ -409,6 +587,8 @@ class ChatService:
         usage: dict[str, Any] | None = None,
         options: list[str] | None = None,
         command: str | None = None,
+        project_refs: list[dict[str, str]] | None = None,
+        job_refs: list[dict[str, str]] | None = None,
     ) -> None:
         metadata: dict[str, Any] = dict(usage or {})
         if options:
@@ -417,6 +597,10 @@ class ChatService:
         user_metadata: dict[str, Any] = {}
         if command_id:
             user_metadata["command"] = command_id
+        if project_refs:
+            user_metadata["project_refs"] = project_refs
+        if job_refs:
+            user_metadata["job_refs"] = job_refs
         rows = [
             {
                 "conversation_id": conversation_id,
@@ -438,6 +622,20 @@ class ChatService:
         await client.table("messages").insert(rows).execute()
         title_hint = user_message or (f"/{command_id}" if command_id else "")
         await self._set_conversation_metadata(client, conversation_id, title_hint)
+
+        # Persist the chat <-> project links so the project page can list threads.
+        if project_refs:
+            service = ProjectService(client)
+            for ref in project_refs:
+                project_id = ref.get("id")
+                if not project_id:
+                    continue
+                try:
+                    await service.link_conversation(
+                        user_id, project_id, conversation_id
+                    )
+                except Exception:  # noqa: BLE001 - link is best-effort
+                    pass
 
     async def _set_conversation_metadata(
         self, client: AsyncClient, conversation_id: str, user_message: str
@@ -479,13 +677,20 @@ class ChatService:
         conversation_id: str,
         user_message: str,
         recent_context: str = "",
+        project_ids: list[str] | None = None,
     ) -> list[dict[str, str]]:
         """Post-response memory extraction run.
 
         ``recent_context`` is the conversation history captured *before* this
         turn, so the current message is not duplicated in the prompt.
+
+        ``project_ids`` are the projects explicitly referenced this turn (e.g.
+        via @mention). When present, an extracted project memory is attached to
+        the first referenced project instead of name-matching/creating one.
         """
         memory_service = self._memory_service_factory(client)
+        project_service = ProjectService(client)
+        target_project_id = project_ids[0] if project_ids else None
 
         extracted, usage, model = await self._extractor.extract(
             user_message, recent_context[:2000]
@@ -505,6 +710,18 @@ class ChatService:
                 confidence=item.confidence,
             )
             saved.append({"id": memory.id, "type": memory.type, "content": memory.content})
+            # Project memories also feed the Proyek page (best-effort; a
+            # failure here must not drop the memory that was just saved).
+            if item.type == "project":
+                try:
+                    await project_service.sync_from_memory(
+                        user_id,
+                        item.content,
+                        conversation_id=conversation_id,
+                        target_project_id=target_project_id,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
         return saved
 
 

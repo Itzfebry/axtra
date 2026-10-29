@@ -68,6 +68,13 @@ MODEL_TPM_LIMIT=8000
 MODEL_DAILY_TOKEN_LIMIT=200000
 MAX_UPLOAD_BYTES=10485760
 MAX_DOCUMENT_CHARS=12000
+
+# GitHub repo indexing (kosong = repo publik saja).
+GITHUB_TOKEN=$($map['GITHUB_TOKEN'])
+REPO_INDEX_MAX_FILES=300
+REPO_INDEX_MAX_FILE_BYTES=200000
+REPO_INDEX_MAX_CHUNKS=4000
+REPO_QA_CONTEXT_CHUNKS=8
 "@
 [IO.File]::WriteAllText((Join-Path $root 'backend\.env'), ($backend -replace "`r`n", "`n"))
 "backend/.env written"

@@ -1,12 +1,36 @@
 "use client";
 
-import { ArrowUp, Brain, FileText, Square, Terminal, Trash2, Upload, X } from "lucide-react";
+import {
+  ArrowUp,
+  AtSign,
+  Brain,
+  Briefcase,
+  FileText,
+  Globe,
+  Link2,
+  Loader2,
+  Square,
+  Terminal,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "@/components/Markdown";
-import { fetchChatSettings, type ChatCommand, type ChatModeId } from "@/lib/api";
 import {
+  fetchChatSettings,
+  listJobs,
+  listProjects,
+  type ChatCommand,
+  type ChatModeId,
+  type JobApplication,
+  type Project,
+} from "@/lib/api";
+import {
+  crawlSource,
   openRoute,
   removeAttachment,
+  removeSource,
   send,
   setDraft,
   setPendingCommand,
@@ -17,7 +41,7 @@ import {
   visibleContent,
 } from "@/lib/chatStore";
 import { getChatMode, type ChatMode } from "@/lib/chatModes";
-import { takePrompt } from "@/lib/orchestratorBridge";
+import { queuePrompt, takePrompt } from "@/lib/orchestratorBridge";
 
 function formatSeconds(seconds: number): string {
   return `${seconds.toFixed(1).replace(".", ",")} dtk`;
@@ -43,6 +67,17 @@ export function ChatPanel({
   >({});
   const [paletteIndex, setPaletteIndex] = useState(0);
 
+  // @mention: projects and job applications whose context is injected.
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [jobs, setJobs] = useState<JobApplication[]>([]);
+  const [mentions, setMentions] = useState<
+    { id: string; name: string; kind: "project" | "job" }[]
+  >([]);
+  const [mentionIndex, setMentionIndex] = useState(0);
+
+  // Riset Web: the URL the user wants to crawl next.
+  const [urlInput, setUrlInput] = useState("");
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const stickToBottom = useRef(true);
@@ -62,15 +97,37 @@ export function ChatPanel({
   const modeConfig = getChatMode(mode);
   const ModeIcon = modeConfig.icon;
 
+  // Switching conversations reuses this component (no remount), so drop the
+  // per-thread composer state: mention chips and the crawl URL must not leak
+  // into the next thread.
+  useEffect(() => {
+    setMentions([]);
+    setUrlInput("");
+    setMentionIndex(0);
+    pendingHandled.current = false;
+  }, [activeKey]);
+
+  const sliceReady = Boolean(slice);
+  const sliceLoading = slice?.loading ?? false;
+  const sliceSending = slice?.sending ?? false;
+
   // Auto-send a prompt handed off by the homepage orchestrator.
   useEffect(() => {
-    if (pendingHandled.current || !activeKey || slice?.loading) return;
+    if (pendingHandled.current || !activeKey || !sliceReady) return;
+    if (sliceLoading || sliceSending) return;
     const handedOff = takePrompt(mode);
     if (!handedOff) return;
     pendingHandled.current = true;
     stickToBottom.current = true;
-    void send(activeKey, handedOff);
-  }, [activeKey, mode, slice?.loading]);
+    void send(activeKey, handedOff).then((accepted) => {
+      // The slice could not accept the send yet; put the prompt back so it is
+      // not silently lost.
+      if (!accepted) {
+        pendingHandled.current = false;
+        queuePrompt(mode, handedOff);
+      }
+    });
+  }, [activeKey, mode, sliceReady, sliceLoading, sliceSending]);
 
   const modeCommands = useMemo(
     () => commandsByMode[mode as ChatModeId] ?? [],
@@ -106,9 +163,69 @@ export function ChatPanel({
     };
   }, []);
 
+  // Projects can be referenced with @name; their context grounds the reply.
+  useEffect(() => {
+    let cancelled = false;
+    listProjects()
+      .then((rows) => {
+        if (!cancelled) setProjects(rows);
+      })
+      .catch(() => {
+        // Mentions are optional; plain chat still works.
+      });
+    listJobs()
+      .then((rows) => {
+        if (!cancelled) setJobs(rows);
+      })
+      .catch(() => {
+        // Job mentions are optional too.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const mentionTargets = useMemo(
+    () => [
+      ...projects.map((project) => ({
+        kind: "project" as const,
+        id: project.id,
+        name: project.name,
+        detail: project.description || project.status,
+      })),
+      ...jobs.map((job) => ({
+        kind: "job" as const,
+        id: job.id,
+        name: `${job.role} — ${job.company}`,
+        detail: `${job.status}${job.location ? ` · ${job.location}` : ""}`,
+      })),
+    ],
+    [projects, jobs],
+  );
+
+  const mentionMatch = /(?:^|\s)@([^\s@]*)$/.exec(draft);
+  const mentionQuery = mentionMatch ? mentionMatch[1].toLowerCase() : null;
+  const mentionOpen =
+    mentionQuery !== null && mentionTargets.length > 0 && !pendingCommand;
+  const mentionResults = useMemo(
+    () =>
+      mentionOpen
+        ? mentionTargets
+            .filter((target) =>
+              target.name.toLowerCase().includes(mentionQuery ?? ""),
+            )
+            .slice(0, 6)
+        : [],
+    [mentionOpen, mentionQuery, mentionTargets],
+  );
+
   useEffect(() => {
     setPaletteIndex(0);
   }, [slashQuery]);
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionQuery]);
 
   const scrollToBottom = (behavior: ScrollBehavior = "auto") => {
     bottomRef.current?.scrollIntoView({ behavior, block: "end" });
@@ -116,7 +233,6 @@ export function ChatPanel({
 
   useEffect(() => {
     if (stickToBottom.current) scrollToBottom();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slice?.messages, activeKey]);
 
   function handleScroll() {
@@ -133,10 +249,48 @@ export function ChatPanel({
     element.style.height = `${Math.min(element.scrollHeight, 200)}px`;
   }
 
-  function submit(rawText: string) {
+  function submit(rawText: string, includeMentions = false) {
     if (!activeKey) return;
+    const text = rawText.trim();
+    // `/crawl <url>` (or the /crawl palette chip + a URL) crawls right away.
+    if (mode === "research") {
+      const crawlMatch = /^\/crawl\s+(\S+)$/i.exec(text);
+      const commandUrl =
+        pendingCommand === "crawl" && /^https?:\/\//i.test(text) ? text : null;
+      const url = crawlMatch?.[1] ?? commandUrl;
+      if (url) {
+        setDraft(activeKey, "");
+        setPendingCommand(activeKey, null);
+        void crawlSource(activeKey, url);
+        return;
+      }
+    }
     stickToBottom.current = true;
-    void send(activeKey, rawText);
+    const projectIds = includeMentions
+      ? mentions.filter((mention) => mention.kind === "project").map((mention) => mention.id)
+      : [];
+    const jobIds = includeMentions
+      ? mentions.filter((mention) => mention.kind === "job").map((mention) => mention.id)
+      : [];
+    if (includeMentions) setMentions([]);
+    void send(activeKey, rawText, projectIds, jobIds);
+  }
+
+  function chooseMention(target: (typeof mentionTargets)[number]) {
+    if (!activeKey) return;
+    setDraft(
+      activeKey,
+      draft.replace(/(^|\s)@([^\s@]*)$/, (_match, prefix: string) => `${prefix}@${target.name} `),
+    );
+    setMentions((previous) =>
+      previous.some(
+        (mention) => mention.id === target.id && mention.kind === target.kind,
+      )
+        ? previous
+        : [...previous, { id: target.id, name: target.name, kind: target.kind }],
+    );
+    setMentionIndex(0);
+    textareaRef.current?.focus();
   }
 
   function handleUpload(file: File) {
@@ -144,6 +298,14 @@ export function ChatPanel({
     void uploadAttachment(activeKey, file).finally(() => {
       if (fileInputRef.current) fileInputRef.current.value = "";
     });
+  }
+
+  function handleCrawl(event: React.FormEvent) {
+    event.preventDefault();
+    if (!activeKey || !urlInput.trim()) return;
+    const url = urlInput.trim();
+    setUrlInput("");
+    void crawlSource(activeKey, url);
   }
 
   function chooseCommand(command: ChatCommand) {
@@ -155,10 +317,36 @@ export function ChatPanel({
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    submit(draft);
+    submit(draft, true);
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (mentionOpen && mentionResults.length > 0) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setMentionIndex((index) => (index + 1) % mentionResults.length);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setMentionIndex(
+          (index) => (index - 1 + mentionResults.length) % mentionResults.length,
+        );
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (activeKey) {
+          setDraft(activeKey, draft.replace(/(^|\s)@([^\s@]*)$/, ""));
+        }
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        chooseMention(mentionResults[Math.min(mentionIndex, mentionResults.length - 1)]);
+        return;
+      }
+    }
     if (paletteOpen && paletteCommands.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
@@ -184,7 +372,7 @@ export function ChatPanel({
         chooseCommand(paletteCommands[Math.min(paletteIndex, paletteCommands.length - 1)]);
         return;
       }
-      submit(draft);
+      submit(draft, true);
     }
   }
 
@@ -239,6 +427,11 @@ export function ChatPanel({
               {mode === "document" && (
                 <p className="mt-4 text-[12px] text-muted">
                   Unggah dokumen lewat tombol di bawah, lalu ajukan pertanyaan.
+                </p>
+              )}
+              {mode === "research" && (
+                <p className="mt-4 text-[12px] text-muted">
+                  Tempel URL halaman web di bawah, crawl, lalu ajukan pertanyaan.
                 </p>
               )}
             </div>
@@ -390,9 +583,123 @@ export function ChatPanel({
           </div>
         )}
 
+        {mode === "research" && (
+          <div className="mx-auto mb-2 w-full max-w-3xl rounded-lg border border-border bg-surface p-2.5">
+            <div className="flex items-center gap-1.5 text-[12px] text-muted">
+              <Globe size={14} aria-hidden />
+              <span>Sumber web</span>
+            </div>
+            <form onSubmit={handleCrawl} className="mt-2 flex items-center gap-1.5">
+              <label htmlFor="crawl-url" className="sr-only">
+                URL halaman web
+              </label>
+              <input
+                id="crawl-url"
+                type="url"
+                value={urlInput}
+                onChange={(event) => setUrlInput(event.target.value)}
+                placeholder="https://contoh.com/artikel"
+                disabled={slice.crawling}
+                className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-2.5 text-[13px] text-foreground outline-none placeholder:text-muted focus:border-foreground/40 disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!urlInput.trim() || slice.crawling}
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
+              >
+                {slice.crawling ? (
+                  <Loader2 size={14} className="animate-spin" aria-hidden />
+                ) : (
+                  <Link2 size={14} aria-hidden />
+                )}
+                {slice.crawling ? "Crawl..." : "Crawl"}
+              </button>
+            </form>
+
+            {slice.sources.length > 0 ? (
+              <ul className="mt-2 space-y-1">
+                {slice.sources.map((source) => (
+                  <li
+                    key={source.id}
+                    className="flex items-start justify-between gap-2 rounded border border-border px-2 py-1.5"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-[12px] text-foreground">
+                        {source.title || source.url}
+                      </p>
+                      <p className="truncate text-[10px] text-muted">
+                        {source.site} · {source.char_count} karakter
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label={`Hapus sumber ${source.title || source.url}`}
+                      title="Hapus sumber"
+                      onClick={() => activeKey && void removeSource(activeKey, source.id)}
+                      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+                    >
+                      <Trash2 size={14} aria-hidden />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-[11px] text-muted">
+                Masukkan URL lalu crawl. Sumber dipakai sebagai konteks jawaban.
+              </p>
+            )}
+
+            {slice.crawlError && (
+              <p role="alert" className="mt-2 text-[11px] text-danger">
+                {slice.crawlError}
+              </p>
+            )}
+          </div>
+        )}
+
         <p role="status" aria-live="polite" className="sr-only">
           {sending ? "Axtra sedang menjawab." : ""}
         </p>
+
+        {mentionOpen && mentionResults.length > 0 && (
+          <ul
+            role="listbox"
+            aria-label="Rujuk proyek atau lamaran"
+            className="mx-auto mb-2 w-full max-w-3xl overflow-hidden rounded-lg border border-border bg-surface"
+          >
+            {mentionResults.map((target, index) => (
+              <li
+                key={`${target.kind}-${target.id}`}
+                role="option"
+                aria-selected={index === mentionIndex}
+              >
+                <button
+                  type="button"
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    chooseMention(target);
+                  }}
+                  onMouseEnter={() => setMentionIndex(index)}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors duration-150 ${
+                    index === mentionIndex
+                      ? "bg-surface-muted text-foreground"
+                      : "text-muted hover:bg-surface-muted hover:text-foreground"
+                  }`}
+                >
+                  {target.kind === "job" ? (
+                    <Briefcase size={14} aria-hidden className="shrink-0" />
+                  ) : (
+                    <AtSign size={14} aria-hidden className="shrink-0" />
+                  )}
+                  <span className="shrink-0 font-medium">{target.name}</span>
+                  <span className="truncate text-[12px] text-muted">
+                    {target.detail}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {paletteOpen && paletteCommands.length > 0 && (
           <ul
@@ -443,6 +750,40 @@ export function ChatPanel({
           </div>
         )}
 
+        {mentions.length > 0 && (
+          <div className="mx-auto mb-2 flex w-full max-w-3xl flex-wrap gap-1.5">
+            {mentions.map((mention) => (
+              <span
+                key={`${mention.kind}-${mention.id}`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-2 py-1 text-[12px] text-foreground"
+              >
+                {mention.kind === "job" ? (
+                  <Briefcase size={12} aria-hidden />
+                ) : (
+                  <AtSign size={12} aria-hidden />
+                )}
+                {mention.name}
+                <button
+                  type="button"
+                  onClick={() =>
+                    setMentions((previous) =>
+                      previous.filter(
+                        (item) =>
+                          item.id !== mention.id || item.kind !== mention.kind,
+                      ),
+                    )
+                  }
+                  aria-label={`Hapus rujukan ${mention.name}`}
+                  title="Hapus rujukan"
+                  className="text-muted transition-colors duration-150 hover:text-foreground"
+                >
+                  <X size={12} aria-hidden />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="mx-auto flex w-full max-w-3xl items-end gap-2">
           <label htmlFor="composer" className="sr-only">
             Tulis pesan
@@ -460,9 +801,11 @@ export function ChatPanel({
             placeholder={
               mode === "document" && slice.documents.length === 0
                 ? "Unggah dokumen dulu, atau tulis pertanyaan..."
-                : modeCommands.length > 0
-                  ? "Tulis pesan, atau ketik / untuk command..."
-                  : "Tulis pesan..."
+                : mode === "research" && slice.sources.length === 0
+                  ? "Masukkan URL di atas lalu crawl, atau tulis pertanyaan..."
+                  : modeCommands.length > 0
+                  ? "Tulis pesan, / untuk command, @ untuk rujuk proyek..."
+                  : "Tulis pesan, atau ketik @ untuk rujuk proyek..."
             }
             className="max-h-[200px] min-h-[40px] flex-1 resize-none rounded-lg border border-border bg-surface px-3 py-2.5 text-[14px] text-foreground outline-none placeholder:text-muted focus:border-foreground/40"
           />

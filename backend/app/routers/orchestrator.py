@@ -26,6 +26,7 @@ _ALLOWED_ROUTES = {
     "/memory",
     "/profile",
     "/settings",
+    "/jobs",
 }
 
 # Chat modes are sub-tools of /chat; expose each so intent maps to the right one.
@@ -34,9 +35,10 @@ _CHAT_MODE_ROUTES: dict[str, str] = {
     "/chat/curhat": "Curhat - ruang cerita aman, nada empatik, jangan buru-buru solusi",
     "/chat/brainstorming": "Brainstorming - meledakkan banyak ide",
     "/chat/document": "Document - tanya jawab dengan dokumen yang diunggah",
+    "/chat/research": "Riset Web - crawl halaman web lalu tanya jawab dengan sumbernya",
 }
 _ALLOWED_ROUTES |= set(_CHAT_MODE_ROUTES)
-_CHAT_MODES = ["general", "curhat", "brainstorming", "document"]
+_CHAT_MODES = ["general", "curhat", "brainstorming", "document", "research"]
 
 _SYSTEM_PROMPT = """\
 Kamu adalah Axtra, orchestrator untuk halaman menu ruang kerja pengguna.
@@ -78,7 +80,7 @@ Aturan aksi:
 tool/halaman tempat pengguna ingin bekerja. Bila pengguna ingin mengobrol, \
 pilih mode chat yang paling cocok (curhat -> /chat/curhat, \
 brainstorming -> /chat/brainstorming, dokumen -> /chat/document, \
-lainnya -> /chat/general). Isi "prompt" bila pengguna sudah menyebut isi \
+riset web/crawl URL -> /chat/research, lainnya -> /chat/general). Isi "prompt" bila pengguna sudah menyebut isi \
 permintaannya, agar dikirim otomatis di sana.
 - new_conversation: buat percakapan baru pada mode tertentu; "title" dan \
 "prompt" opsional dari permintaan pengguna.

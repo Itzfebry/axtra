@@ -132,6 +132,35 @@ MODE_ROLE_PRESETS: dict[ChatModeId, list[dict[str, str]]] = {
             ),
         },
     ],
+    "research": [
+        {
+            "id": "web_researcher",
+            "label": "Peneliti Web",
+            "description": "Mencari, membandingkan, dan merangkum sumber dengan rujukan.",
+            "instruction": (
+                "Peran: peneliti web. Cari dan bandingkan informasi dari sumber yang "
+                "tersedia, lalu rangkum dengan rujukan judul/URL yang jelas."
+            ),
+        },
+        {
+            "id": "source_analyst",
+            "label": "Analis Sumber",
+            "description": "Menguji kredibilitas, bias, dan konsistensi antar sumber.",
+            "instruction": (
+                "Peran: analis sumber. Uji kredibilitas dan bias tiap sumber, tandai "
+                "klaim yang lemah, dan sebutkan bila antar sumber bertentangan."
+            ),
+        },
+        {
+            "id": "research_summarizer",
+            "label": "Perangkum Riset",
+            "description": "Merangkum temuan jadi poin ringkas dengan sitasi.",
+            "instruction": (
+                "Peran: perangkum riset. Ringkas temuan menjadi poin-poin ringkas yang "
+                "terstruktur, masing-masing disertai rujukan sumber."
+            ),
+        },
+    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -200,6 +229,26 @@ MODE_BEHAVIOR_PRESETS: dict[ChatModeId, list[dict[str, Any]]] = {
             "instruction": (
                 "Alur dokumen: pahami pertanyaan, cari bagian dokumen yang relevan, "
                 "jawab dengan rujukan, dan tandai jika jawaban tidak ada di dokumen."
+            ),
+        },
+    ],
+    "research": [
+        {
+            "id": "scan_compare_summarize",
+            "label": "Baca - Bandingkan - Ringkas",
+            "steps": ["Baca sumber", "Bandingkan", "Ringkas + rujukan"],
+            "instruction": (
+                "Alur riset web: baca sumber hasil crawl, bandingkan antar sumber, lalu "
+                "ringkas temuan dengan rujukan judul/URL dan tandai ketidakpastian."
+            ),
+        },
+        {
+            "id": "direct_answer",
+            "label": "Jawab + rujukan",
+            "steps": ["Cari di sumber", "Jawab + rujukan"],
+            "instruction": (
+                "Alur riset web ringkas: cari bagian sumber yang relevan, jawab langsung, "
+                "selalu sertakan rujukan sumber yang dipakai."
             ),
         },
     ],
@@ -415,6 +464,62 @@ CHAT_COMMANDS: dict[ChatModeId, list[dict[str, str]]] = {
             ),
         },
     ],
+    "research": [
+        {
+            "id": "crawl",
+            "label": "crawl",
+            "description": "Crawl URL (mis. /crawl https://...) lalu ringkas sumbernya.",
+            "instruction": (
+                "Perintah /crawl: gunakan sumber web hasil crawl yang baru ditambahkan. "
+                "Baca isinya, sebut judul/URL sumbernya, lalu ringkas temuan utama."
+            ),
+        },
+        {
+            "id": "summarize",
+            "label": "summarize",
+            "description": "Ringkas sumber web jadi poin utama.",
+            "instruction": (
+                "Perintah /summarize: ringkas sumber web yang tersedia menjadi poin utama "
+                "yang terstruktur, masing-masing dengan rujukan sumbernya."
+            ),
+        },
+        {
+            "id": "compare",
+            "label": "compare",
+            "description": "Bandingkan beberapa sumber: persamaan & perbedaan.",
+            "instruction": (
+                "Perintah /compare: bandingkan sumber-sumber web yang ada. Sajikan "
+                "persamaan, perbedaan, dan mana yang paling kredibel, dengan rujukan."
+            ),
+        },
+        {
+            "id": "keypoints",
+            "label": "keypoints",
+            "description": "Ambil poin kunci dari sumber web.",
+            "instruction": (
+                "Perintah /keypoints: tarik poin-poin kunci dari sumber web sebagai daftar "
+                "singkat, masing-masing satu baris, disertai rujukan sumber."
+            ),
+        },
+        {
+            "id": "cite",
+            "label": "cite",
+            "description": "Jawab dengan rujukan judul/URL sumber.",
+            "instruction": (
+                "Perintah /cite: jawab pertanyaan dengan menyebut secara eksplisit judul "
+                "dan URL tiap sumber yang menjadi dasar jawaban."
+            ),
+        },
+        {
+            "id": "extract",
+            "label": "extract",
+            "description": "Tarik fakta/data spesifik dari sumber.",
+            "instruction": (
+                "Perintah /extract: tarik fakta, angka, atau data spesifik dari sumber web "
+                "ke dalam daftar/table, dan tandai sumber tiap item."
+            ),
+        },
+    ],
 }
 
 VALID_MODES = set(MODE_ROLE_PRESETS)
@@ -522,7 +627,7 @@ def catalog() -> dict[str, Any]:
                 "roles": MODE_ROLE_PRESETS[mode],
                 "behaviors": MODE_BEHAVIOR_PRESETS[mode],
             }
-            for mode in ("general", "curhat", "brainstorming", "document")
+            for mode in ("general", "curhat", "brainstorming", "document", "research")
         ],
         "commands": {
             mode: commands for mode, commands in CHAT_COMMANDS.items()

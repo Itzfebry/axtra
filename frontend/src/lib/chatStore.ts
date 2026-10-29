@@ -11,11 +11,15 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import {
   apiFetch,
+  crawlUrl as apiCrawlUrl,
   deleteDocument as apiDeleteDocument,
+  deleteResearchSource as apiDeleteResearchSource,
   listDocuments,
+  listResearchSources,
   streamChat,
   uploadDocument as apiUploadDocument,
   type DocumentRow,
+  type ResearchSource,
 } from "@/lib/api";
 import type { ChatMode } from "@/lib/chatModes";
 
@@ -62,6 +66,10 @@ export type ChatSlice = {
   documentsLoaded: boolean;
   uploading: boolean;
   uploadError: string | null;
+  sources: ResearchSource[];
+  sourcesLoaded: boolean;
+  crawling: boolean;
+  crawlError: string | null;
 };
 
 type State = {
@@ -129,6 +137,10 @@ function blankSlice(
     documentsLoaded: false,
     uploading: false,
     uploadError: null,
+    sources: [],
+    sourcesLoaded: false,
+    crawling: false,
+    crawlError: null,
   };
 }
 
@@ -219,6 +231,7 @@ async function loadConversation(key: string) {
       mode: resolvedMode,
     });
     if (resolvedMode === "document") void loadDocuments(key);
+    if (resolvedMode === "research") void loadSources(key);
   } catch (error) {
     if (!state.slices[key]) return;
     updateSlice(key, {
@@ -238,6 +251,19 @@ async function loadDocuments(key: string) {
   } catch {
     if (!state.slices[key]) return;
     updateSlice(key, { documentsLoaded: true });
+  }
+}
+
+async function loadSources(key: string) {
+  const slice = state.slices[key];
+  if (!slice?.conversationId || slice.sourcesLoaded) return;
+  try {
+    const rows = await listResearchSources(slice.conversationId);
+    if (!state.slices[key]) return;
+    updateSlice(key, { sources: rows, sourcesLoaded: true });
+  } catch {
+    if (!state.slices[key]) return;
+    updateSlice(key, { sourcesLoaded: true });
   }
 }
 
@@ -296,7 +322,16 @@ function rekey(oldKey: string, conversationId: string, mode: ChatMode): string {
     timers.set(conversationId, timer);
   }
   if (typeof window !== "undefined") {
-    window.history.replaceState(null, "", `/chat/${conversationId}`);
+    // Only rewrite the address bar when the user is on this chat's own route.
+    // Streams survive navigation, so a background tab must not hijack the URL
+    // while the user is on the homepage or another page.
+    const pathname = window.location.pathname;
+    const ownsRoute = oldKey.startsWith("new:")
+      ? pathname === "/chat" || pathname === `/chat/${mode}`
+      : pathname === `/chat/${oldKey}`;
+    if (ownsRoute) {
+      window.history.replaceState(null, "", `/chat/${conversationId}`);
+    }
   }
   persistMeta();
   return conversationId;
@@ -312,6 +347,7 @@ export function openRoute(conversationId: string | null, mode: ChatMode): string
   const slice = state.slices[key];
   if (slice?.conversationId && !slice.loaded && !slice.sending) void loadConversation(key);
   if (slice?.conversationId && slice.mode === "document") void loadDocuments(key);
+  if (slice?.conversationId && slice.mode === "research") void loadSources(key);
   return key;
 }
 
@@ -349,12 +385,17 @@ export function stop(key: string) {
   controllers.get(key)?.abort();
 }
 
-export async function send(key: string, rawText: string) {
+export async function send(
+  key: string,
+  rawText: string,
+  projectIds: string[] = [],
+  jobIds: string[] = [],
+) {
   const initial = state.slices[key];
-  if (!initial || initial.sending) return;
+  if (!initial || initial.sending) return false;
   const command = initial.pendingCommand;
   const text = rawText.trim();
-  if (!text && !command) return;
+  if (!text && !command) return false;
 
   const controller = new AbortController();
   controllers.set(key, controller);
@@ -399,6 +440,8 @@ export async function send(key: string, rawText: string) {
         use_memory: true,
         mode: initial.mode,
         command: command ?? undefined,
+        project_ids: projectIds,
+        job_ids: jobIds,
       },
       controller.signal,
     )) {
@@ -464,6 +507,7 @@ export async function send(key: string, rawText: string) {
     notifyConversations();
     persistMeta();
   }
+  return true;
 }
 
 export async function uploadAttachment(key: string, file: File) {
@@ -518,6 +562,62 @@ export async function removeAttachment(key: string, documentId: string) {
   }
 }
 
+export async function crawlSource(key: string, url: string) {
+  const slice = state.slices[key];
+  if (!slice || slice.crawling) return;
+  const trimmed = url.trim();
+  if (!trimmed) return;
+  updateSlice(key, { crawling: true, crawlError: null });
+  let targetKey = key;
+  try {
+    const source = await apiCrawlUrl(trimmed, slice.conversationId);
+    if (!state.slices[key]) return;
+    if (!slice.conversationId) {
+      targetKey = rekey(key, source.conversation_id, slice.mode);
+    }
+    const target = state.slices[targetKey];
+    if (target) {
+      commit({
+        ...state,
+        slices: {
+          ...state.slices,
+          [targetKey]: {
+            ...target,
+            sources: [...target.sources, source],
+            sourcesLoaded: true,
+            crawling: false,
+            crawlError: null,
+          },
+        },
+      });
+    }
+  } catch (error) {
+    if (state.slices[targetKey]) {
+      updateSlice(targetKey, {
+        crawling: false,
+        crawlError: error instanceof Error ? error.message : "Crawl gagal.",
+      });
+    }
+  }
+}
+
+export async function removeSource(key: string, sourceId: string) {
+  const slice = state.slices[key];
+  if (!slice) return;
+  const previous = slice.sources;
+  updateSlice(key, { sources: previous.filter((item) => item.id !== sourceId) });
+  try {
+    await apiDeleteResearchSource(sourceId);
+  } catch (error) {
+    if (state.slices[key]) {
+      updateSlice(key, {
+        sources: previous,
+        crawlError: error instanceof Error ? error.message : "Gagal menghapus sumber.",
+      });
+    }
+  }
+}
+
 export function getState(): State {
   return state;
 }
@@ -538,7 +638,16 @@ function useStore<T>(
     cache.current = { value: next };
     return next;
   }, [selector, isEqual]);
-  const getServerSnapshot = useCallback(() => selector(SERVER_STATE), [selector]);
+  // Cache the server snapshot too: a selector that builds a new object each
+  // call (e.g. useChatTabs) must return a stable reference, or React warns
+  // about an infinite loop.
+  const serverCache = useRef<{ selector: typeof selector; value: T } | null>(null);
+  const getServerSnapshot = useCallback(() => {
+    if (!serverCache.current || serverCache.current.selector !== selector) {
+      serverCache.current = { selector, value: selector(SERVER_STATE) };
+    }
+    return serverCache.current.value;
+  }, [selector]);
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 

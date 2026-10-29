@@ -19,6 +19,7 @@ function emptyDrafts(): Drafts {
     curhat: { roles: [], role_note: "", behavior: "" },
     brainstorming: { roles: [], role_note: "", behavior: "" },
     document: { roles: [], role_note: "", behavior: "" },
+    research: { roles: [], role_note: "", behavior: "" },
   };
 }
 
@@ -75,6 +76,7 @@ export function ModeSettings() {
 
   async function handleSave(mode: ChatModeId) {
     const draft = drafts[mode];
+    if (!draft) return;
     setSaving(mode);
     setError(null);
     try {
@@ -85,7 +87,8 @@ export function ModeSettings() {
         role_note: draft.role_note,
       });
       setSettings(data);
-      setDrafts(data.selected);
+      // Merge only the saved mode so unsaved edits in other modes survive.
+      setDrafts((prev) => ({ ...prev, [mode]: data.selected[mode] ?? prev[mode] }));
       setSaved(mode);
       window.setTimeout(() => setSaved((current) => (current === mode ? null : current)), 2000);
     } catch (err) {
@@ -119,7 +122,8 @@ export function ModeSettings() {
           {settings.modes.map((entry) => {
             const config = getChatMode(entry.id);
             const Icon = config.icon;
-            const draft = drafts[entry.id];
+            const draft =
+              drafts[entry.id] ?? { roles: [], role_note: "", behavior: "" };
             const behaviorPreset = entry.behaviors.find(
               (behavior) => behavior.id === draft.behavior,
             );

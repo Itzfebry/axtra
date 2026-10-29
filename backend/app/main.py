@@ -21,10 +21,13 @@ from app.routers import (
     conversations,
     documents,
     health,
+    jobs,
     memories,
     orchestrator,
     profile,
+    projects,
     recommendations,
+    research,
     usage,
 )
 
@@ -100,6 +103,9 @@ def create_app() -> FastAPI:
     app.include_router(conversations.router)
     app.include_router(documents.router)
     app.include_router(memories.router)
+    app.include_router(projects.router)
+    app.include_router(jobs.router)
+    app.include_router(research.router)
     app.include_router(recommendations.router)
     app.include_router(orchestrator.router)
     app.include_router(usage.router)

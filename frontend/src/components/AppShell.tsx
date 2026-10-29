@@ -165,6 +165,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname === "/" ||
     pathname === "/profile" ||
     pathname === "/memory" ||
+    pathname === "/projects" ||
+    pathname.startsWith("/projects/") ||
+    pathname === "/jobs" ||
+    pathname.startsWith("/jobs/") ||
     pathname === "/settings";
 
   const handleDeleteConversation = useCallback(

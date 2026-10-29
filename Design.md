@@ -138,8 +138,6 @@ Axtra
 │       ├── Memory
 │       ├── Projects
 │       ├── Journal
-│       ├── Mentor
-│       ├── Automations
 │       └── Settings
 │
 └── Main Chat Area

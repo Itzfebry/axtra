@@ -56,6 +56,8 @@ async def chat(payload: ChatRequest, user: CurrentUser = Depends(rate_limit)):
             temperature=payload.temperature,
             mode=payload.mode,
             command=payload.command,
+            project_ids=payload.project_ids,
+            job_ids=payload.job_ids,
         ):
             yield _format_sse(event["event"], event["data"])
 

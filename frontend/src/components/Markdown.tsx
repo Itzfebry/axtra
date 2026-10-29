@@ -1,18 +1,27 @@
 "use client";
 
 import { Check, Copy } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { useEffect, useRef, type ReactNode, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   async function handleCopy() {
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+      timerRef.current = window.setTimeout(() => setCopied(false), 1500);
     } catch {
       // Clipboard may be blocked; keep the action silent.
     }
@@ -51,6 +60,30 @@ function CodeBlock({ children }: { children?: ReactNode }) {
   );
 }
 
+/**
+ * LLMs sometimes emit literal HTML line breaks (e.g. `<br>`) inside Markdown,
+ * often within table cells. Renderers show them as raw text. Replace those
+ * breaks with a visual separator, but leave fenced code blocks untouched.
+ */
+function normalizeMarkdown(content: string): string {
+  const brPattern = /<br\s*\/?>/gi;
+  return content
+    .split(/(```[\s\S]*?```)/g)
+    .map((segment) => {
+      if (segment.startsWith("```")) {
+        return segment;
+      }
+      // Leave inline code spans untouched too.
+      return segment
+        .split(/(`[^`]*`)/g)
+        .map((part) =>
+          part.startsWith("`") ? part : part.replace(brPattern, " · "),
+        )
+        .join("");
+    })
+    .join("");
+}
+
 export function Markdown({ content }: { content: string }) {
   return (
     <div className="markdown text-[14px] leading-relaxed">
@@ -65,7 +98,7 @@ export function Markdown({ content }: { content: string }) {
           ),
         }}
       >
-        {content}
+        {normalizeMarkdown(content)}
       </ReactMarkdown>
     </div>
   );
