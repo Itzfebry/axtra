@@ -183,8 +183,8 @@ export function FeatureSidebar() {
                           aria-controls="feature-chat-modes"
                           className={`w-full ${className} ${
                             chatActive
-                              ? "bg-surface-muted text-foreground"
-                              : "text-foreground hover:bg-surface-muted"
+                              ? "bg-surface-muted font-medium text-foreground"
+                              : "text-muted hover:bg-surface-muted hover:text-foreground"
                           }`}
                         >
                           <Icon size={16} className="shrink-0" aria-hidden />
@@ -212,7 +212,7 @@ export function FeatureSidebar() {
                                     title={chatMode.label}
                                     className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12px] transition-colors duration-150 ${
                                       modeActive
-                                        ? "bg-surface-muted text-foreground"
+                                        ? "bg-surface-muted font-medium text-foreground"
                                         : "text-muted hover:bg-surface-muted hover:text-foreground"
                                     }`}
                                   >
@@ -262,8 +262,8 @@ export function FeatureSidebar() {
                           aria-current={active ? "page" : undefined}
                           className={`${className} ${
                             active
-                              ? "bg-surface-muted text-foreground"
-                              : "text-foreground hover:bg-surface-muted"
+                              ? "bg-surface-muted font-medium text-foreground"
+                              : "text-muted hover:bg-surface-muted hover:text-foreground"
                           }`}
                         >
                           {body}

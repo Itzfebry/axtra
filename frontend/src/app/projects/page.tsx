@@ -4,6 +4,7 @@ import { Plus, Search, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { LoadingState } from "@/components/ui/LoadingState";
 import {
   createProject,
   deleteProject,
@@ -315,7 +316,7 @@ export default function ProjectsPage() {
           <div className="flex items-start justify-between gap-3">
             <div>
               <h1 className="text-2xl font-semibold tracking-tight">Proyek</h1>
-              <p className="mt-1 max-w-2xl text-[13px] text-muted">
+              <p className="mt-1 max-w-2xl text-[14px] text-muted">
                 Spesifikasi, keputusan teknis, dan progres tiap proyek. Proyek juga
                 terisi otomatis dari percakapan.
               </p>
@@ -419,9 +420,9 @@ export default function ProjectsPage() {
 
           <div className="mt-5 grid grid-cols-1 gap-3 xl:grid-cols-2">
             {loading ? (
-              <p className="text-[13px] text-muted xl:col-span-2">Memuat...</p>
+              <LoadingState label="Memuat proyek..." variant="cards" rows={4} className="xl:col-span-2" />
             ) : projects.length === 0 ? (
-              <p className="text-[13px] text-muted xl:col-span-2">
+              <p className="text-[14px] text-muted xl:col-span-2">
                 Belum ada proyek. Tambahkan manual atau sebutkan proyek di percakapan.
               </p>
             ) : (
@@ -478,7 +479,7 @@ export default function ProjectsPage() {
                             )}
                           </div>
                           {project.description && (
-                            <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-[13px] text-foreground/90">
+                            <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-[14px] text-foreground/90">
                               {project.description}
                             </p>
                           )}

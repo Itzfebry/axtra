@@ -11,7 +11,7 @@ export default function SettingsPage() {
           <header>
             <p className="text-[11px] uppercase tracking-wide text-muted">Preferensi</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">Pengaturan</h1>
-            <p className="mt-1 max-w-2xl text-[13px] text-muted">
+            <p className="mt-1 max-w-2xl text-[14px] text-muted">
               Atur posisi dan perilaku Axtra untuk tiap fitur serta mode chat.
             </p>
           </header>

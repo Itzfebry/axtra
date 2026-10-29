@@ -5,10 +5,13 @@ import { Check, SlidersHorizontal } from "lucide-react";
 import {
   fetchChatSettings,
   saveChatSettings,
+  saveCrawlSettings,
   type ChatModeId,
   type ChatSettings,
+  type CrawlProviderId,
   type ModeSelection,
 } from "@/lib/api";
+import { LoadingState } from "@/components/ui/LoadingState";
 import { getChatMode } from "@/lib/chatModes";
 
 type Drafts = Record<ChatModeId, ModeSelection>;
@@ -29,6 +32,7 @@ export function ModeSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<ChatModeId | null>(null);
   const [saved, setSaved] = useState<ChatModeId | null>(null);
+  const [savingCrawl, setSavingCrawl] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -98,6 +102,20 @@ export function ModeSettings() {
     }
   }
 
+  async function handleSaveCrawl(provider: CrawlProviderId) {
+    if (!settings?.crawl || settings.crawl.provider === provider) return;
+    setSavingCrawl(true);
+    setError(null);
+    try {
+      const crawl = await saveCrawlSettings({ provider });
+      setSettings((prev) => (prev ? { ...prev, crawl } : prev));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal menyimpan pengaturan crawl.");
+    } finally {
+      setSavingCrawl(false);
+    }
+  }
+
   return (
     <section>
       <header className="flex items-center gap-2">
@@ -109,12 +127,68 @@ export function ModeSettings() {
         alur perilakunya. Perubahan berlaku pada balasan berikutnya.
       </p>
 
-      {loading && <p className="mt-4 text-[13px] text-muted">Memuat pengaturan...</p>}
+      {loading && (
+        <LoadingState label="Memuat pengaturan..." variant="cards" rows={4} className="mt-4" />
+      )}
 
       {error && (
         <p role="alert" className="mt-4 text-[12px] text-danger">
           {error}
         </p>
+      )}
+
+      {settings?.crawl && (
+        <div className="mt-4 rounded-lg border border-border bg-surface p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-[12px] uppercase tracking-wide text-muted">
+              Provider crawl
+            </h3>
+            {settings.crawl.provider === "firecrawl" && (
+              <span className="text-[11px] text-muted">
+                Kuota Firecrawl: {settings.crawl.daily_used}/{settings.crawl.daily_limit} hari
+                ini &middot; {settings.crawl.monthly_used}/{settings.crawl.monthly_limit} bulan ini
+              </span>
+            )}
+          </div>
+          <p className="mt-1 max-w-2xl text-[12px] text-muted">
+            Dipakai untuk Riset Web dan crawl lowongan. Parser bawaan gratis dan
+            privat; Firecrawl mengambil halaman berat JavaScript dengan kualitas
+            teks lebih baik. Kunci Firecrawl hanya tersimpan di server.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {(
+              [
+                { id: "httpx", label: "Parser bawaan (httpx)" },
+                { id: "firecrawl", label: "Firecrawl" },
+              ] as { id: CrawlProviderId; label: string }[]
+            ).map((option) => {
+              const selected = settings.crawl?.provider === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  aria-pressed={selected}
+                  disabled={savingCrawl}
+                  onClick={() => void handleSaveCrawl(option.id)}
+                  className={`inline-flex items-center gap-1 rounded-full border px-3 py-1 text-[12px] transition-colors duration-150 disabled:opacity-60 ${
+                    selected
+                      ? "border-foreground/40 bg-surface-muted text-foreground"
+                      : "border-border text-muted hover:bg-surface-muted hover:text-foreground"
+                  }`}
+                >
+                  {selected && <Check size={12} aria-hidden />}
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          {settings.crawl.provider === "firecrawl" && !settings.crawl.firecrawl_ready && (
+            <p role="alert" className="mt-2 text-[11px] text-danger">
+              Firecrawl belum dikonfigurasi di server (kunci kosong). Crawl akan
+              memakai parser bawaan sampai kunci diisi.
+            </p>
+          )}
+        </div>
       )}
 
       {settings && (
@@ -146,7 +220,7 @@ export function ModeSettings() {
                   <span className="text-[11px] uppercase tracking-wide text-muted">
                     Peran Axtra
                   </span>
-                  <span className="text-[10px] text-muted">
+                  <span className="text-[11px] text-muted">
                     {draft.roles.length} dipilih
                   </span>
                 </div>
@@ -199,8 +273,8 @@ export function ModeSettings() {
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">
                     {behaviorPreset.steps.map((step, index) => (
                       <span key={step} className="flex items-center gap-1">
-                        {index > 0 && <span className="text-[10px] text-muted">→</span>}
-                        <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted">
+                        {index > 0 && <span className="text-[11px] text-muted">→</span>}
+                        <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">
                           {step}
                         </span>
                       </span>

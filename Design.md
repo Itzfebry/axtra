@@ -390,6 +390,16 @@ Untuk pekerjaan yang tidak harus selesai dalam request interaktif:
 
 Gunakan SSE, WebSocket, atau polling terbatas berdasarkan kebutuhan. Jangan mengandalkan timer browser untuk pekerjaan terjadwal.
 
+### Crawl Provider Policy
+
+Crawl (Riset Web + crawl lowongan) memakai satu seam agar provider bisa diganti tanpa mengubah pemanggil:
+
+- `web_crawler.py` menyimpan helper provider-agnostik: `normalize_url`, guard SSRF, `CrawledPage`, `html_to_text`. `CrawledPage.format` menandai isi teks (`text` atau `markdown`).
+- `crawlers/httpx_crawler.py` = parser bawaan (default, gratis, privat). `crawlers/firecrawl.py` = opt-in (`POST /v2/scrape`, markdown).
+- `crawl_provider.py` memilih provider, menegakkan batas kredit, dan fallback ke parser bawaan saat Firecrawl tidak tersedia.
+- Validasi URL + guard SSRF selalu berjalan sebelum panggilan provider.
+- Preferensi user hanya menyimpan nama provider; kunci tinggal di env server. Kredit dicatat di `crawl_usage_events` (sukses dan gagal).
+
 ## 13. Loading, Error, and Empty States
 
 ### Loading

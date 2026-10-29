@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { LoadingState } from "@/components/ui/LoadingState";
 import { apiFetch } from "@/lib/api";
 
 type Profile = {
@@ -70,13 +71,13 @@ export default function ProfilePage() {
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto w-full max-w-xl px-4 py-6 pb-16">
           <h1 className="text-2xl font-semibold tracking-tight">Profil</h1>
-          <p className="mt-1 text-[13px] text-muted">
+          <p className="mt-1 text-[14px] text-muted">
             Identitas dasar yang menjadi konteks percakapan. Fakta lain dikumpulkan otomatis
             sebagai memori.
           </p>
 
           {loading ? (
-            <p className="mt-6 text-[13px] text-muted">Memuat…</p>
+            <LoadingState label="Memuat profil..." variant="form" rows={4} className="mt-6" />
           ) : (
             <form onSubmit={save} className="mt-6 space-y-4">
               <div>

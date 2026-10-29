@@ -135,12 +135,12 @@ export function UsageMeter({
           </span>
         )}
         {collapsed ? (
-          <span className="truncate text-[10px] tabular-nums text-muted">
+          <span className="truncate text-[11px] tabular-nums text-muted">
             {formatTokens(minute)} TPM
           </span>
         ) : (
           usage && (
-            <span className="truncate text-[10px] text-muted" title={usage.model}>
+            <span className="truncate text-[11px] text-muted" title={usage.model}>
               {usage.model}
             </span>
           )
@@ -163,7 +163,7 @@ export function UsageMeter({
           />
 
           {usage && (
-            <p className="mt-1.5 text-[10px] text-muted">
+            <p className="mt-1.5 text-[11px] text-muted">
               {resetLabel(usage.day_reset_at)}
             </p>
           )}

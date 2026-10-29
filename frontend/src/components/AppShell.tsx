@@ -2,12 +2,12 @@
 
 import {
   Brain,
-  Home,
+  ChevronDown,
   LogOut,
   Menu,
-  MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings,
   User,
   X,
 } from "lucide-react";
@@ -21,6 +21,7 @@ import { isChatMode, type ChatMode } from "@/lib/chatModes";
 import { ChatTabs } from "@/components/ChatTabs";
 import { ChatHistoryMenu } from "@/components/ChatHistoryMenu";
 import { FeatureSidebar } from "@/components/FeatureSidebar";
+import { NavigationProgress } from "@/components/NavigationProgress";
 import { PageTransition } from "@/components/PageTransition";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { UsageMeter } from "@/components/UsageMeter";
@@ -52,7 +53,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(false);
-  const [moreOpen, setMoreOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   // Sidebar sections that the user can collapse. Persisted in localStorage.
   const [usageOpen, setUsageOpen] = useState(true);
   const loadedCount = useRef(0);
@@ -156,9 +157,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // `/chat` (no segment) opens a fresh General chat, so its history is General's.
   const activeMode: ChatMode | null =
     routeMode ?? activeConversation?.mode ?? (pathname === "/chat" ? "general" : null);
+  // History is shared across chat modes so each row's mode label is visible;
+  // conversations from the active mode are sorted to the top.
   const visibleConversations = activeMode
-    ? conversations.filter((conversation) => conversation.mode === activeMode)
-    : [];
+    ? [...conversations].sort(
+        (a, b) =>
+          Number(b.mode === activeMode) - Number(a.mode === activeMode),
+      )
+    : conversations;
   // The theme toggle lives only on the menu/preference pages; other pages show
   // the conversation history control in its place.
   const menuPage =
@@ -193,8 +199,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       pathname={pathname}
       usageOpen={usageOpen}
       onToggleUsage={toggleUsage}
-      moreOpen={moreOpen}
-      onToggleMore={() => setMoreOpen((value) => !value)}
+      accountOpen={accountOpen}
+      onToggleAccount={() => setAccountOpen((value) => !value)}
       onNavigate={() => setDrawerOpen(false)}
       onToggleCollapse={() => setCollapsed((value) => !value)}
       onSignOut={handleSignOut}
@@ -203,6 +209,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen overflow-hidden bg-background text-foreground">
+      <NavigationProgress />
       <aside
         className={`hidden shrink-0 border-r border-border bg-surface md:flex md:flex-col ${
           collapsed ? "w-14" : "w-56"
@@ -235,8 +242,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               pathname={pathname}
               usageOpen={usageOpen}
               onToggleUsage={toggleUsage}
-              moreOpen={moreOpen}
-              onToggleMore={() => setMoreOpen((value) => !value)}
+              accountOpen={accountOpen}
+              onToggleAccount={() => setAccountOpen((value) => !value)}
               onNavigate={() => setDrawerOpen(false)}
               onToggleCollapse={() => setDrawerOpen(false)}
               onSignOut={handleSignOut}
@@ -268,7 +275,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <ChatHistoryMenu
               conversations={visibleConversations}
               activeConversationId={activeConversationId}
-              showModeLabel={!activeMode}
               hasMore={hasMore}
               loading={loadingConversations}
               onLoadMore={() => void loadConversations(true)}
@@ -292,8 +298,8 @@ type SidebarProps = {
   pathname: string;
   usageOpen: boolean;
   onToggleUsage: () => void;
-  moreOpen: boolean;
-  onToggleMore: () => void;
+  accountOpen: boolean;
+  onToggleAccount: () => void;
   onNavigate: () => void;
   onToggleCollapse: () => void;
   onSignOut: () => void;
@@ -305,17 +311,17 @@ function SidebarBody({
   pathname,
   usageOpen,
   onToggleUsage,
-  moreOpen,
-  onToggleMore,
+  accountOpen,
+  onToggleAccount,
   onNavigate,
   onToggleCollapse,
   onSignOut,
   mobile = false,
 }: SidebarProps) {
-  const primaryItems = [
-    { href: "/", label: "Beranda", icon: Home },
-    { href: "/memory", label: "Memori", icon: Brain },
+  const accountItems = [
     { href: "/profile", label: "Profil", icon: User },
+    { href: "/memory", label: "Memori", icon: Brain },
+    { href: "/settings", label: "Pengaturan", icon: Settings },
   ];
   const rail = collapsed && !mobile;
 
@@ -361,24 +367,30 @@ function SidebarBody({
       <div className={`mt-auto shrink-0 border-t border-border px-2 py-2 ${rail ? "flex flex-col items-center gap-1" : ""}`}>
         <button
           type="button"
-          onClick={onToggleMore}
-          aria-expanded={moreOpen}
-          aria-controls="more-menu"
-          title="Lainnya"
+          onClick={onToggleAccount}
+          aria-expanded={accountOpen}
+          aria-controls="account-menu"
+          title="Akun"
           className={`flex items-center gap-2 rounded-lg px-2 py-2 text-[13px] text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground ${
             rail ? "h-10 w-10 justify-center px-0" : "w-full"
           }`}
         >
-          <MoreHorizontal size={18} aria-hidden />
-          {!rail && <span>Lainnya</span>}
+          <User size={18} aria-hidden />
+          {!rail && <span className="flex-1 text-left">Akun</span>}
+          {!rail && (
+            <ChevronDown
+              size={14}
+              aria-hidden
+              className={`text-muted transition-transform duration-150 ${accountOpen ? "" : "-rotate-90"}`}
+            />
+          )}
         </button>
 
-        {moreOpen && (
-          <ul id="more-menu" className={`space-y-0.5 ${rail ? "mt-1" : "mt-1"}`}>
-            {primaryItems.map((item) => {
+        {accountOpen && (
+          <ul id="account-menu" className="mt-1 space-y-0.5">
+            {accountItems.map((item) => {
               const Icon = item.icon;
-              const active =
-                item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              const active = pathname.startsWith(item.href);
               return (
                 <li key={item.href}>
                   <Link
@@ -389,7 +401,7 @@ function SidebarBody({
                       rail ? "h-10 w-10 justify-center px-0" : "w-full"
                     } ${
                       active
-                        ? "bg-surface-muted text-foreground"
+                        ? "bg-surface-muted font-medium text-foreground"
                         : "text-muted hover:bg-surface-muted hover:text-foreground"
                     }`}
                   >
@@ -399,22 +411,20 @@ function SidebarBody({
                 </li>
               );
             })}
+            <li>
+              <button
+                type="button"
+                onClick={onSignOut}
+                title="Keluar"
+                className={`flex items-center gap-2 rounded-lg px-2 py-2 text-[13px] text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground ${
+                  rail ? "h-10 w-10 justify-center px-0" : "w-full"
+                }`}
+              >
+                <LogOut size={18} aria-hidden />
+                {!rail && <span>Keluar</span>}
+              </button>
+            </li>
           </ul>
-        )}
-
-        <div className={`mt-1 flex items-center gap-1 ${rail ? "flex-col" : "justify-end"}`}>
-          <button
-            type="button"
-            onClick={onSignOut}
-            aria-label="Keluar"
-            title="Keluar"
-            className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
-          >
-            <LogOut size={18} aria-hidden />
-          </button>
-        </div>
-        {!rail && (
-          <p className="mt-1 truncate px-1 text-[11px] text-muted">Pemilik</p>
         )}
       </div>
     </div>

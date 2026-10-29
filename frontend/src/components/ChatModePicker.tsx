@@ -43,7 +43,7 @@ export function ChatModePicker() {
                     {mode.capabilities.map((capability) => (
                       <li
                         key={capability}
-                        className="rounded border border-border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted"
+                        className="rounded border border-border px-1.5 py-0.5 text-[11px] uppercase tracking-wide text-muted"
                       >
                         {capability}
                       </li>

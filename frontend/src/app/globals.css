@@ -35,7 +35,7 @@
   --foreground: #f7f8f8;
   --muted: #d0d6e0;
   --muted-2: #8a8f98;
-  --muted-3: #62666d;
+  --muted-3: #8a8f98;
   --border: #28282c;
   --primary: #5e6ad2;
   --primary-foreground: #f7f8f8;
@@ -55,7 +55,7 @@
   --foreground: #171717;
   --muted: #737373;
   --muted-2: #6b7280;
-  --muted-3: #9ca3af;
+  --muted-3: #6b7280;
   --border: #e5e5e5;
   --primary: #171717;
   --primary-foreground: #ffffff;
@@ -245,4 +245,21 @@ body {
 }
 .animate-menu-in > li:nth-child(n + 5) {
   animation-delay: 80ms;
+}
+
+/* Indeterminate top bar for route navigation (NavigationProgress). */
+@keyframes axtra-nav-progress {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
+
+.animate-nav-progress {
+  animation: axtra-nav-progress 1.1s ease-in-out infinite;
 }

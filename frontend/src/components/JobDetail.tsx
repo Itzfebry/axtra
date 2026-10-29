@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { LoadingState } from "@/components/ui/LoadingState";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -113,7 +114,7 @@ function ScoreBar({
           style={{ width: `${value ?? 0}%` }}
         />
       </div>
-      <p className="mt-1 text-[10px] text-muted">{hint}</p>
+      <p className="mt-1 text-[11px] text-muted">{hint}</p>
     </div>
   );
 }
@@ -244,7 +245,11 @@ export function JobDetail({ jobId }: { jobId: string }) {
       const updated = await crawlJob(job.id, urlInput.trim() || undefined);
       applyJob(updated);
       setUrlInput(updated.job_url ?? "");
-      setNotice("Lowongan berhasil di-crawl. Sekarang jalankan analisa CV.");
+      setNotice(
+        updated.crawl_notice
+          ? `${updated.crawl_notice} Deskripsi lowongan diperbarui.`
+          : "Lowongan berhasil di-crawl. Sekarang jalankan analisa CV.",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Crawl gagal.");
     } finally {
@@ -381,7 +386,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl px-4 py-6">
-          <p className="text-[13px] text-muted">Memuat lamaran...</p>
+          <LoadingState label="Memuat detail lamaran..." variant="detail" rows={5} />
         </div>
       </div>
     );
@@ -426,7 +431,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
             </h1>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <span
-                className={`rounded border px-1.5 py-0.5 text-[10px] ${statusChipClass(
+                className={`rounded border px-1.5 py-0.5 text-[11px] ${statusChipClass(
                   job.status,
                 )}`}
               >
@@ -526,7 +531,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
                 </p>
               )}
               {job.analyzed_at && (
-                <p className="mt-2 text-[10px] text-muted">
+                <p className="mt-2 text-[11px] text-muted">
                   Terakhir dianalisa {formatDate(job.analyzed_at)}
                 </p>
               )}
@@ -673,7 +678,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
                     className={`resize-y ${inputClass}`}
                   />
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[10px] text-muted">
+                    <span className="text-[11px] text-muted">
                       {coverText.trim().split(/\s+/).filter(Boolean).length} kata
                     </span>
                     <div className="flex items-center gap-2">
@@ -689,7 +694,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
                         type="button"
                         onClick={() => void saveCover()}
                         disabled={!coverDirty}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-2.5 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
                       >
                         <Save size={13} aria-hidden />
                         Simpan
@@ -849,7 +854,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
                   <div className="flex justify-end">
                     <button
                       type="submit"
-                      className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted"
                     >
                       <Save size={13} aria-hidden />
                       Simpan detail
@@ -869,7 +874,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
                     ["Sumber", job.source === "crawl" ? "Crawl" : "Manual"],
                   ].map(([label, value]) => (
                     <div key={label}>
-                      <dt className="text-[10px] uppercase tracking-wide text-muted">
+                      <dt className="text-[11px] uppercase tracking-wide text-muted">
                         {label}
                       </dt>
                       <dd className="text-foreground">{value}</dd>
@@ -877,7 +882,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
                   ))}
                   {job.notes && (
                     <div className="sm:col-span-2">
-                      <dt className="text-[10px] uppercase tracking-wide text-muted">
+                      <dt className="text-[11px] uppercase tracking-wide text-muted">
                         Catatan
                       </dt>
                       <dd className="whitespace-pre-wrap text-foreground">{job.notes}</dd>
@@ -986,7 +991,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
                   Generate cover letter
                 </button>
               </div>
-              <p className="mt-2 text-[10px] text-muted">
+              <p className="mt-2 text-[11px] text-muted">
                 Analisa dan cover letter memakai CV aktif. Perbarui CV bila
                 pengalamanmu berubah.
               </p>

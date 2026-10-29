@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AppShell } from "@/components/AppShell";
+import { LoadingState } from "@/components/ui/LoadingState";
 import { Markdown } from "@/components/Markdown";
 import {
   analyzeProjectHealth,
@@ -626,7 +627,7 @@ export default function ProjectDetailPage() {
           </Link>
 
           {loading ? (
-            <p className="mt-6 text-[13px] text-muted">Memuat...</p>
+            <LoadingState label="Memuat detail proyek..." variant="detail" rows={6} className="mt-6" />
           ) : !project ? (
             <p className="mt-6 text-[13px] text-danger">
               {error ?? "Proyek tidak ditemukan."}
@@ -782,7 +783,7 @@ export default function ProjectDetailPage() {
                     <button
                       type="submit"
                       disabled={saving}
-                      className="inline-flex h-9 items-center rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+                      className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-[13px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
                     >
                       {saving ? "Menyimpan..." : "Simpan"}
                     </button>
@@ -889,7 +890,7 @@ export default function ProjectDetailPage() {
                     <button
                       type="submit"
                       disabled={addingTask || !newTask.trim()}
-                      className="inline-flex h-[38px] shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+                      className="inline-flex h-[38px] shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 text-[13px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
                     >
                       <Plus size={14} aria-hidden />
                       Tambah
@@ -903,7 +904,7 @@ export default function ProjectDetailPage() {
                   )}
 
                   {tasksLoading ? (
-                    <p className="mt-3 text-[12px] text-muted">Memuat tugas...</p>
+                    <LoadingState label="Memuat tugas..." variant="inline" className="mt-3" />
                   ) : (
                     <div className="mt-3">
                       {tasks.length === 0 && (
@@ -1013,7 +1014,7 @@ export default function ProjectDetailPage() {
                             ? !docDraft.url.trim()
                             : !docDraft.title.trim() && !docDraft.content.trim())
                         }
-                        className="inline-flex h-[38px] items-center gap-1.5 rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+                        className="inline-flex h-[38px] items-center gap-1.5 rounded-lg border border-border px-3 text-[13px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
                       >
                         <Plus size={14} aria-hidden />
                         {editingDocId ? "Simpan perubahan" : "Tambah"}
@@ -1042,7 +1043,7 @@ export default function ProjectDetailPage() {
                   )}
 
                   {documentsLoading ? (
-                    <p className="mt-3 text-[12px] text-muted">Memuat data...</p>
+                    <LoadingState label="Memuat data..." variant="inline" className="mt-3" />
                   ) : documents.length === 0 ? (
                     <p className="mt-3 text-[12px] text-muted">
                       Belum ada data non-repo. Tambahkan spesifikasi, notulen,
@@ -1142,7 +1143,7 @@ export default function ProjectDetailPage() {
                             <span className="min-w-0 flex-1 truncate text-foreground">
                               {conversation.title ?? "Percakapan"}
                             </span>
-                            <span className="shrink-0 text-[10px] text-muted">
+                            <span className="shrink-0 text-[11px] text-muted">
                               {conversation.message_count} pesan ·{" "}
                               {formatWhen(
                                 conversation.last_message_at ??
@@ -1242,7 +1243,7 @@ export default function ProjectDetailPage() {
                     }
                   >
                     {filesLoading ? (
-                      <p className="text-[12px] text-muted">Memuat file...</p>
+                      <LoadingState label="Memuat file..." variant="inline" />
                     ) : files.length === 0 ? (
                       <p className="text-[12px] text-muted">Belum ada file.</p>
                     ) : (
@@ -1265,7 +1266,7 @@ export default function ProjectDetailPage() {
                                 <span className="min-w-0 flex-1 truncate font-mono">
                                   {file.path}
                                 </span>
-                                <span className="shrink-0 text-[10px] text-muted">
+                                <span className="shrink-0 text-[11px] text-muted">
                                   {file.chunk_count}
                                 </span>
                               </button>
@@ -1275,14 +1276,14 @@ export default function ProjectDetailPage() {
 
                         <div className="min-h-40 rounded-lg border border-border">
                           {fileLoading ? (
-                            <p className="p-3 text-[12px] text-muted">Memuat...</p>
+                            <LoadingState label="Memuat file..." variant="inline" className="p-3" />
                           ) : openFile ? (
                             <>
                               <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
                                 <span className="truncate font-mono text-[11px] text-muted">
                                   {openFile.path}
                                 </span>
-                                <span className="shrink-0 text-[10px] text-muted">
+                                <span className="shrink-0 text-[11px] text-muted">
                                   {openFile.language}
                                 </span>
                               </div>
@@ -1370,7 +1371,7 @@ export default function ProjectDetailPage() {
 
                   <div className="mt-3 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
                     {asksLoading && asks.length === 0 ? (
-                      <p className="text-[12px] text-muted">Memuat riwayat...</p>
+                      <LoadingState label="Memuat riwayat..." variant="inline" />
                     ) : asks.length === 0 && !pendingQuestion ? (
                       <p className="text-[12px] text-muted">
                         {repoReady
@@ -1384,7 +1385,7 @@ export default function ProjectDetailPage() {
                             <p className="min-w-0 flex-1 text-[13px] font-medium">
                               {turn.question}
                             </p>
-                            <span className="shrink-0 text-[10px] text-muted">
+                            <span className="shrink-0 text-[11px] text-muted">
                               {formatWhen(turn.created_at)}
                             </span>
                             <button
@@ -1406,7 +1407,7 @@ export default function ProjectDetailPage() {
                               <Markdown content={turn.answer} />
                               {turn.sources.length > 0 && (
                                 <div className="mt-3 border-t border-border pt-2">
-                                  <p className="mb-1.5 text-[10px] uppercase tracking-wide text-muted">
+                                  <p className="mb-1.5 text-[11px] uppercase tracking-wide text-muted">
                                     Sumber
                                   </p>
                                   <div className="flex flex-wrap gap-1.5">
@@ -1547,7 +1548,7 @@ function TaskCard({
         )}
         <div className="mt-1 flex items-center gap-1.5">
           <span
-            className={`inline-block rounded-full border px-2 py-0.5 text-[10px] ${PRIORITY_CLASSES[task.priority]}`}
+            className={`inline-block rounded-full border px-2 py-0.5 text-[11px] ${PRIORITY_CLASSES[task.priority]}`}
           >
             {PRIORITY_LABELS[task.priority]}
           </span>
@@ -1558,7 +1559,7 @@ function TaskCard({
               onStatusChange(event.target.value as ProjectTaskStatus)
             }
             aria-label="Ubah status tugas"
-            className="rounded border border-border bg-surface px-1 py-0.5 text-[10px] text-muted outline-none disabled:opacity-40"
+            className="rounded border border-border bg-surface px-1 py-0.5 text-[11px] text-muted outline-none disabled:opacity-40"
           >
             {TASK_COLUMNS.map(({ status, label }) => (
               <option key={status} value={status}>

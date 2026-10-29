@@ -21,7 +21,6 @@ type ConversationRow = {
 export function ChatHistoryMenu({
   conversations,
   activeConversationId,
-  showModeLabel,
   hasMore,
   loading,
   onLoadMore,
@@ -30,7 +29,6 @@ export function ChatHistoryMenu({
 }: {
   conversations: ConversationRow[];
   activeConversationId: string | null;
-  showModeLabel: boolean;
   hasMore: boolean;
   loading: boolean;
   onLoadMore: () => void;
@@ -77,9 +75,13 @@ export function ChatHistoryMenu({
 
   const term = search.trim().toLowerCase();
   const rows = term
-    ? conversations.filter((conversation) =>
-        (conversation.title ?? "").toLowerCase().includes(term),
-      )
+    ? conversations.filter((conversation) => {
+        const modeLabel = getChatMode(conversation.mode).label.toLowerCase();
+        return (
+          (conversation.title ?? "").toLowerCase().includes(term) ||
+          modeLabel.includes(term)
+        );
+      })
     : conversations;
 
   return (
@@ -177,11 +179,9 @@ export function ChatHistoryMenu({
                       <span className="truncate">
                         {conversation.title ?? "Percakapan"}
                       </span>
-                      {showModeLabel && (
-                        <span className="shrink-0 text-[9px] uppercase tracking-wide text-muted">
-                          {getChatMode(conversation.mode).label}
-                        </span>
-                      )}
+                      <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">
+                        {getChatMode(conversation.mode).label}
+                      </span>
                     </Link>
                     <button
                       type="button"

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { LoadingState } from "@/components/ui/LoadingState";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -76,13 +77,13 @@ function formatDate(value: string | null): string {
 function ScoreChip({ label, value }: { label: string; value: number | null }) {
   if (value == null) {
     return (
-      <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted">
+      <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">
         {label} ·
       </span>
     );
   }
   return (
-    <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground">
+    <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-foreground">
       {label} {value}%
     </span>
   );
@@ -223,7 +224,7 @@ export function JobTracker() {
           <div>
             <p className="text-[11px] uppercase tracking-wide text-muted">Karier</p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight">Cari Kerja</h1>
-            <p className="mt-1 max-w-2xl text-[13px] text-muted">
+            <p className="mt-1 max-w-2xl text-[14px] text-muted">
               Lacak lamaran, crawl lowongan, cocokkan CV, dan siapkan cover letter
               dalam satu tempat.
             </p>
@@ -250,7 +251,7 @@ export function JobTracker() {
               key={item.label}
               className="rounded-lg border border-border bg-surface px-3 py-2.5"
             >
-              <p className="text-[10px] uppercase tracking-wide text-muted">
+              <p className="text-[11px] uppercase tracking-wide text-muted">
                 {item.label}
               </p>
               <p className="mt-0.5 text-xl font-semibold tabular-nums">
@@ -423,7 +424,7 @@ export function JobTracker() {
                   }
                   className={`mt-1 ${inputClass}`}
                 />
-                <p className="mt-1 text-[10px] text-muted">
+                <p className="mt-1 text-[11px] text-muted">
                   Kosongkan untuk memakai tanggal hari ini.
                 </p>
               </div>
@@ -484,7 +485,7 @@ export function JobTracker() {
               <button
                 type="submit"
                 disabled={saving || !form.company.trim() || !form.role.trim()}
-                className="inline-flex h-8 items-center rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+                className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-[12px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
               >
                 {saving ? "Menyimpan..." : "Simpan & buka detail"}
               </button>
@@ -554,12 +555,12 @@ export function JobTracker() {
 
         {/* List */}
         <div className="mt-4">
-          {loading && <p className="text-[13px] text-muted">Memuat lamaran...</p>}
+          {loading && <LoadingState label="Memuat lamaran..." variant="cards" rows={4} />}
 
           {!loading && visible.length === 0 && (
             <div className="rounded-lg border border-border px-4 py-10 text-center">
               <Briefcase size={20} className="mx-auto text-muted" aria-hidden />
-              <p className="mt-2 text-[13px] text-muted">
+              <p className="mt-2 text-[14px] text-muted">
                 {jobs.length === 0
                   ? "Belum ada lamaran. Tambahkan lamaran pertamamu."
                   : "Tidak ada lamaran yang cocok dengan filter."}
@@ -568,7 +569,7 @@ export function JobTracker() {
                 <button
                   type="button"
                   onClick={() => setShowForm(true)}
-                  className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90"
+                  className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted"
                 >
                   <Plus size={13} aria-hidden />
                   Tambah lamaran
@@ -596,7 +597,7 @@ export function JobTracker() {
                         </p>
                       </div>
                       <span
-                        className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] ${statusChipClass(
+                        className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] ${statusChipClass(
                           job.status,
                         )}`}
                       >
@@ -608,12 +609,12 @@ export function JobTracker() {
                       <ScoreChip label="Match" value={job.match_score} />
                       <ScoreChip label="Peluang" value={job.success_score} />
                       {job.work_type && (
-                        <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted">
+                        <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">
                           {job.work_type}
                         </span>
                       )}
                       {job.deadline && (
-                        <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted">
+                        <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-muted">
                           DL {formatDate(job.deadline)}
                         </span>
                       )}
