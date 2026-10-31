@@ -37,9 +37,9 @@
   --muted-2: #8a8f98;
   --muted-3: #8a8f98;
   --border: #28282c;
-  --primary: #5e6ad2;
-  --primary-foreground: #f7f8f8;
-  --accent: #5e6ad2;
+  --primary: #e2874c;
+  --primary-foreground: #1b1109;
+  --accent: #e2874c;
   --success: #22c55e;
   --warning: #f59e0b;
   --danger: #ef4444;
@@ -57,9 +57,9 @@
   --muted-2: #6b7280;
   --muted-3: #6b7280;
   --border: #e5e5e5;
-  --primary: #171717;
+  --primary: #c96f36;
   --primary-foreground: #ffffff;
-  --accent: #5e6ad2;
+  --accent: #c96f36;
   --success: #16a34a;
   --warning: #d97706;
   --danger: #b42318;
@@ -78,6 +78,11 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Brand display font for feature/page titles (not the sidebar). */
+.font-brand {
+  font-family: var(--font-brand), var(--font-sans);
 }
 
 /* Visible focus for keyboard users (Design.md §14). */
@@ -215,6 +220,57 @@ body {
   animation: axtra-page-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* Login welcome: soft fade-up for supporting elements. */
+@keyframes axtra-welcome {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-welcome {
+  animation: axtra-welcome 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: opacity, transform;
+}
+
+/* Premium headline reveal: each line slides up from a mask. */
+@keyframes axtra-line {
+  from {
+    transform: translateY(130%) scale(0.96);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.animate-line {
+  animation: axtra-line 1150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+@keyframes axtra-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-4px);
+  }
+  75% {
+    transform: translateX(4px);
+  }
+}
+
+.animate-shake {
+  animation: axtra-shake 180ms ease-in-out 1;
+}
+
 @keyframes axtra-menu-in {
   from {
     opacity: 0;
@@ -262,4 +318,36 @@ body {
 
 .animate-nav-progress {
   animation: axtra-nav-progress 1.1s ease-in-out infinite;
+}
+
+/* Repo index: scanning sheen sweeping across the progress bar. */
+@keyframes axtra-scan {
+  0% {
+    transform: translateX(-130%);
+  }
+  100% {
+    transform: translateX(430%);
+  }
+}
+
+.animate-scan {
+  animation: axtra-scan 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  will-change: transform;
+}
+
+/* Repo index: gentle pulse on the current stage dot. */
+@keyframes axtra-step-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.5;
+  }
+}
+
+.animate-step-pulse {
+  animation: axtra-step-pulse 1.4s ease-in-out infinite;
 }

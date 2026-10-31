@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
@@ -43,6 +44,18 @@ sebagian file. Tulis ringkasan analisa berbahasa Indonesia,format Markdown, \
 maksimal 12 baris. Cakup: tujuan proyek, stack utama, struktur, status/kualitas \
 kode, dan 2-3 risiko atau TODO yang terlihat. Jangan mengarang fitur yang tidak \
 ada bukti di file.
+"""
+
+_PROJECT_QA_SYSTEM = """\
+Kamu adalah Axtra, asisten proyek. Jawab pertanyaan pengguna tentang PROYEK \
+(ide, tujuan, stack, catatan, dokumen, tugas, atau ringkasan repo) berdasarkan \
+konteks proyek di bawah. Repository bersifat opsional: pertanyaan tidak harus \
+soal kode. Jika informasi tidak ada di konteks, katakan tidak ada dan jangan \
+mengarang; sarankan melengkapi catatan/dokumen atau meng-index repo bila perlu.
+
+Format jawaban: Markdown murni. JANGAN tulis tag HTML (mis. <br>, <p>, <ul>). \
+Gunakan daftar Markdown pendek atau pemisah " · ". Bungkus path/simbol kode \
+dengan backtick. Bahasa Indonesia, ringkas, jawaban utuh.
 """
 
 
@@ -380,55 +393,56 @@ class CodeIndexer:
             for row in result.data or []
         ]
 
-    async def _indexed_chunk_count(self, project_id: str) -> int:
-        try:
-            response = (
-                await self._client.table("projects")
-                .select("repo_chunk_count")
-                .eq("id", project_id)
-                .single()
-                .execute()
-            )
-            return int((response.data or {}).get("repo_chunk_count") or 0)
-        except Exception:  # noqa: BLE001
-            return 0
+    async def _prepare_answer(
+        self, project_id: str, question: str, persona: str = ""
+    ) -> tuple[list[ChatMessage], list[CodeSourceOut], str | None, int]:
+        """Build the chat messages + sources for a repo/project question.
 
-    async def answer(self, project_id: str, question: str) -> RepoAskOut:
+        Returns ``(messages, sources, fallback_answer, max_tokens)``. When
+        ``fallback_answer`` is set there is no context to ask the model with and
+        the caller should return it verbatim.
+        """
         chunks = await self._retrieve(
             project_id, question, self._settings.repo_qa_context_chunks
         )
         if not chunks:
-            if await self._indexed_chunk_count(project_id) == 0:
-                message = (
-                    "Belum ada hasil index untuk repo ini. Jalankan 'Index repo' "
-                    "lebih dulu."
+            # No repo code to draw on: answer from the project itself so the
+            # "Tanya proyek" feature works without a repository too.
+            context = await self._project_context(project_id)
+            if not context:
+                return (
+                    [],
+                    [],
+                    (
+                        "Belum ada cukup konteks proyek untuk dijawab. Isi deskripsi/"
+                        "catatan proyek, tambahkan dokumen, atau index repo lalu coba lagi."
+                    ),
+                    1500,
                 )
-            else:
-                message = (
-                    "Index repo sudah ada, tetapi tidak ada potongan kode yang cukup "
-                    "cocok dengan pertanyaan ini. Coba sebutkan nama file, fitur, "
-                    "fungsi, atau istilah teknis yang lebih spesifik."
-                )
-            return RepoAskOut(answer=message, sources=[])
-        if not self._llm:
-            raise LLMProviderError("LLM tidak dikonfigurasi.")
+            return (
+                [
+                    ChatMessage(
+                        role="system",
+                        content=(
+                            f"{_PROJECT_QA_SYSTEM}\n\n{persona}"
+                            if persona
+                            else _PROJECT_QA_SYSTEM
+                        ),
+                    ),
+                    ChatMessage(
+                        role="user",
+                        content=f"PERTANYAAN:\n{question}\n\nKONTEKS PROYEK:\n{context}",
+                    ),
+                ],
+                [],
+                None,
+                1500,
+            )
 
         context = "\n\n".join(
             f"--- {chunk.path} ---\n{chunk.snippet[:1200]}" for chunk in chunks
         )
-        answer, _ = await self._llm.complete(
-            ChatRequest(
-                messages=[
-                    ChatMessage(role="system", content=_CODE_QA_SYSTEM),
-                    ChatMessage(role="user", content=f"PERTANYAAN:\n{question}\n\nKONTEKS KODE:\n{context}"),
-                ],
-                model=self._settings.default_chat_model,
-                temperature=0.3,
-                max_tokens=1200,
-                stream=False,
-            )
-        )
-        trimmed = [
+        sources = [
             CodeSourceOut(
                 path=chunk.path,
                 language=chunk.language,
@@ -437,4 +451,130 @@ class CodeIndexer:
             )
             for chunk in chunks
         ]
-        return RepoAskOut(answer=answer.strip(), sources=trimmed)
+        return (
+            [
+                ChatMessage(
+                    role="system",
+                    content=(
+                        f"{_CODE_QA_SYSTEM}\n\n{persona}" if persona else _CODE_QA_SYSTEM
+                    ),
+                ),
+                ChatMessage(
+                    role="user",
+                    content=f"PERTANYAAN:\n{question}\n\nKONTEKS KODE:\n{context}",
+                ),
+            ],
+            sources,
+            None,
+            1200,
+        )
+
+    async def answer(self, project_id: str, question: str, persona: str = "") -> RepoAskOut:
+        messages, sources, fallback, max_tokens = await self._prepare_answer(
+            project_id, question, persona
+        )
+        if fallback is not None:
+            return RepoAskOut(answer=fallback, sources=[])
+        if not self._llm:
+            raise LLMProviderError("LLM tidak dikonfigurasi.")
+        answer, _ = await self._llm.complete(
+            ChatRequest(
+                messages=messages,
+                model=self._settings.default_chat_model,
+                temperature=0.3,
+                max_tokens=max_tokens,
+                stream=False,
+            )
+        )
+        return RepoAskOut(answer=answer.strip(), sources=sources)
+
+    async def answer_stream(
+        self, project_id: str, question: str, persona: str = ""
+    ) -> AsyncIterator[tuple[str, Any]]:
+        """Stream a repo/project answer as ``(kind, payload)`` tuples.
+
+        Yields ``("token", str)`` for each delta, then a final
+        ``("sources", list[CodeSourceOut])``. Raises :class:`LLMProviderError`
+        when the provider is unavailable.
+        """
+        messages, sources, fallback, max_tokens = await self._prepare_answer(
+            project_id, question, persona
+        )
+        if fallback is not None:
+            yield ("token", fallback)
+            yield ("sources", [])
+            return
+        if not self._llm:
+            raise LLMProviderError("LLM tidak dikonfigurasi.")
+        async for chunk in self._llm.stream_chat(
+            ChatRequest(
+                messages=messages,
+                model=self._settings.default_chat_model,
+                temperature=0.3,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+        ):
+            if chunk.delta:
+                yield ("token", chunk.delta)
+        yield ("sources", sources)
+
+
+    async def _project_context(self, project_id: str, limit: int = 6000) -> str:
+        """Project-level context (metadata, notes, documents, tasks, repo summary)."""
+        try:
+            response = (
+                await self._client.table("projects")
+                .select("*")
+                .eq("id", project_id)
+                .single()
+                .execute()
+            )
+        except Exception:  # noqa: BLE001
+            return ""
+        project = response.data or {}
+        lines = [
+            f"- Nama: {project.get('name') or '(tanpa nama)'}",
+            f"- Status: {project.get('status') or '-'}",
+            f"- Deskripsi: {project.get('description') or '(kosong)'}",
+            f"- Tech stack: {', '.join(project.get('tech_stack') or []) or '(kosong)'}",
+            f"- Repo: {project.get('repo_full_name') or project.get('repo_url') or '(belum ada)'}",
+            f"- Catatan: {project.get('notes') or '(kosong)'}",
+        ]
+        if project.get("repo_summary"):
+            lines.append(f"- Ringkasan repo: {project['repo_summary']}")
+
+        try:
+            documents = (
+                await self._client.table("project_documents")
+                .select("*")
+                .eq("project_id", project_id)
+                .limit(20)
+                .execute()
+            ).data or []
+        except Exception:  # noqa: BLE001
+            documents = []
+        for document in documents:
+            body = document.get("url") if document.get("kind") == "link" else (document.get("content") or "")
+            lines.append(
+                f"- Dokumen [{document.get('kind')}] {document.get('title') or '(tanpa judul)'}: "
+                f"{(body or '')[:500]}"
+            )
+
+        try:
+            tasks = (
+                await self._client.table("project_tasks")
+                .select("title,status,priority")
+                .eq("project_id", project_id)
+                .limit(30)
+                .execute()
+            ).data or []
+        except Exception:  # noqa: BLE001
+            tasks = []
+        for task in tasks:
+            lines.append(
+                f"- Tugas [{task.get('status')}] {task.get('title') or '(tanpa judul)'}"
+            )
+
+        text = "\n".join(lines)
+        return text[:limit]

@@ -1,5 +1,12 @@
 import type { Metadata, Viewport } from "next";
+import { Space_Grotesk } from "next/font/google";
 import "./globals.css";
+
+const brandFont = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-brand",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "Axtra — Personal AI Agent",
@@ -43,7 +50,7 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
       </head>
-      <body className="min-h-screen">{children}</body>
+      <body className={`min-h-screen ${brandFont.variable}`}>{children}</body>
     </html>
   );
 }

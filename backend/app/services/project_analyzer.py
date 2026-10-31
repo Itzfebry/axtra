@@ -49,6 +49,7 @@ class ProjectAnalyzer:
         project: ProjectOut,
         tasks: list[ProjectTaskOut],
         documents: list[ProjectDocumentOut] | None = None,
+        persona: str = "",
     ) -> str:
         open_tasks = [task for task in tasks if task.status != "done"]
         done_tasks = [task for task in tasks if task.status == "done"]
@@ -99,7 +100,10 @@ class ProjectAnalyzer:
         answer, _ = await self._llm.complete(
             ChatRequest(
                 messages=[
-                    ChatMessage(role="system", content=_HEALTH_SYSTEM),
+                    ChatMessage(
+                        role="system",
+                        content=f"{_HEALTH_SYSTEM}\n\n{persona}" if persona else _HEALTH_SYSTEM,
+                    ),
                     ChatMessage(role="user", content=prompt),
                 ],
                 model=self._model,

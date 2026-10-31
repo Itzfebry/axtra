@@ -215,7 +215,7 @@ export default function MemoryPage() {
         <div className="mx-auto w-full max-w-3xl px-4 py-6 pb-16">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Memori</h1>
+              <h1 className="text-2xl font-semibold tracking-tight font-brand">Memori</h1>
               <p className="mt-1 text-[14px] text-muted">
                 Semua fakta yang Axtra ingat. Periksa, koreksi, atau hapus kapan pun.
               </p>

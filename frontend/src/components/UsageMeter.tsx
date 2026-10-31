@@ -79,7 +79,8 @@ export function UsageMeter({
     const limit = usage?.minute_limit ?? 0;
     const title = usage
       ? [
-          `Model: ${usage.model}`,
+          `Model aktif: ${usage.model}`,
+          `Provider: ${usage.provider}`,
           `TPM (60 dtk): ${formatExact(minute)}${limit > 0 ? ` dari ${formatExact(limit)}` : ""} token`,
           `Hari ini: ${formatExact(usage.day_tokens)}${usage.day_limit > 0 ? ` dari ${formatExact(usage.day_limit)}` : ""} token`,
           resetLabel(usage.day_reset_at),
@@ -140,7 +141,10 @@ export function UsageMeter({
           </span>
         ) : (
           usage && (
-            <span className="truncate text-[11px] text-muted" title={usage.model}>
+            <span
+              className="max-w-[55%] truncate text-[11px] text-muted"
+              title={`${usage.provider} · ${usage.model}`}
+            >
               {usage.model}
             </span>
           )
@@ -161,12 +165,6 @@ export function UsageMeter({
             limit={dayLimit}
             suffix="hari"
           />
-
-          {usage && (
-            <p className="mt-1.5 text-[11px] text-muted">
-              {resetLabel(usage.day_reset_at)}
-            </p>
-          )}
         </>
       )}
     </section>

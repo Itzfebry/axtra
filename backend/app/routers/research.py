@@ -17,8 +17,20 @@ from app.memory_service_provider import (
     build_memory_extractor,
     build_memory_service,
 )
-from app.schemas import MemoryOut, ResearchCrawlRequest, ResearchSourceOut
-from app.services.crawl_provider import crawl, resolve_user_provider
+from app.schemas import (
+    MemoryOut,
+    ResearchCrawlRequest,
+    ResearchSearchRequest,
+    ResearchSourceOut,
+)
+from app.services.crawl_provider import (
+    crawl,
+    firecrawl_ready,
+    resolve_user_provider,
+)
+from app.services.crawl_usage_service import record_crawl
+from app.services.crawlers import firecrawl
+from app.services.feature_persona import load_feature_persona
 from app.services.usage_service import record_usage
 from app.services.web_crawler import CrawlError, normalize_url
 
@@ -44,7 +56,7 @@ async def _resolve_conversation(
         if (response.data.get("mode") or "general") != "research":
             raise HTTPException(
                 status.HTTP_400_BAD_REQUEST,
-                detail="Crawl hanya tersedia pada mode Riset Web.",
+                detail="Sumber web hanya tersedia pada mode Riset Web.",
             )
         return response.data["id"]
 
@@ -161,6 +173,136 @@ async def crawl_page(
     return _to_source(response.data[0], notice=outcome.notice)
 
 
+@router.post(
+    "/search",
+    response_model=list[ResearchSourceOut],
+    status_code=status.HTTP_201_CREATED,
+)
+async def search_web(
+    payload: ResearchSearchRequest,
+    user: CurrentUser = Depends(rate_limit),
+    settings: Settings = Depends(get_settings),
+) -> list[ResearchSourceOut]:
+    """Web search via Firecrawl and store the hits as conversation sources.
+
+    Only Firecrawl can search; the built-in httpx parser only fetches known
+    URLs, so this endpoint is unavailable when Firecrawl is not configured.
+    """
+    if not firecrawl_ready(settings):
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "Pencarian web butuh Firecrawl. Isi FIRECRAWL_API_KEY di server "
+                "lalu pilih provider Firecrawl."
+            ),
+        )
+
+    conversation_id = payload.conversation_id
+    if conversation_id:
+        conversation_id = await _resolve_conversation(
+            user.client, user.id, conversation_id
+        )
+
+    # Existing URLs in this conversation are never inserted twice.
+    existing_urls: set[str] = set()
+    used = 0
+    if conversation_id:
+        existing = (
+            await user.client.table("research_sources")
+            .select("url")
+            .eq("conversation_id", conversation_id)
+            .execute()
+        )
+        existing_urls = {row.get("url") or "" for row in (existing.data or [])}
+        used = len(existing_urls)
+
+    remaining = max(0, settings.research_max_sources - used)
+    if remaining <= 0:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Maksimal {settings.research_max_sources} sumber per percakapan. "
+                "Hapus salah satu sumber dulu."
+            ),
+        )
+
+    requested = payload.limit or settings.research_search_limit
+    limit = max(1, min(requested, remaining, 10))
+
+    async def _record(*, credits: int, status_: str, code: str) -> None:
+        await record_crawl(
+            user.client,
+            user.id,
+            provider="firecrawl",
+            url=f"search:{payload.query.strip()}"[:1000],
+            credits=credits,
+            status=status_,
+            code=code,
+        )
+
+    try:
+        result = await firecrawl.search(
+            payload.query.strip(), settings=settings, limit=limit
+        )
+    except firecrawl.FirecrawlAuthError as exc:
+        await _record(credits=0, status_="error", code="auth")
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
+    except firecrawl.FirecrawlQuotaError as exc:
+        await _record(credits=0, status_="error", code="quota")
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)
+        ) from exc
+    except firecrawl.FirecrawlUnavailableError as exc:
+        await _record(credits=0, status_="error", code="unavailable")
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, detail=str(exc)
+        ) from exc
+
+    hits = [
+        page
+        for page in result.pages
+        if page.url.startswith(("http://", "https://")) and page.text.strip()
+    ]
+    if not hits:
+        await _record(credits=result.credits, status_="success", code="empty")
+        return []
+
+    # A conversation row is only created once there is something to store.
+    if not conversation_id:
+        conversation_id = await _resolve_conversation(user.client, user.id, None)
+
+    inserted: list[ResearchSourceOut] = []
+    for page in hits:
+        if len(inserted) >= remaining:
+            break
+        if page.url in existing_urls:
+            continue
+        existing_urls.add(page.url)
+        content = page.text[: settings.research_max_chars]
+        response = (
+            await user.client.table("research_sources")
+            .insert(
+                {
+                    "user_id": user.id,
+                    "conversation_id": conversation_id,
+                    "url": page.url,
+                    "title": page.title[:300],
+                    "site": page.site[:200],
+                    "content": content,
+                    "provider": "firecrawl",
+                }
+            )
+            .execute()
+        )
+        if response.data:
+            inserted.append(_to_source(response.data[0]))
+
+    await _record(credits=result.credits, status_="success", code="search")
+    return inserted
+
+
 @router.get("/sources", response_model=list[ResearchSourceOut])
 async def list_sources(
     conversation_id: str = Query(..., min_length=1),
@@ -225,7 +367,10 @@ async def save_source_to_memory(
 
     extractor = build_memory_extractor(llm)
     text = (row.get("content") or "").strip()[:8000]
-    extracted, usage, model = await extractor.extract(text, recent_context="")
+    persona = await load_feature_persona(user.client, "research", user_id=user.id)
+    extracted, usage, model = await extractor.extract(
+        text, recent_context="", persona=persona
+    )
     await record_usage(user.client, user.id, model, usage, source="memory")
 
     memory_service = build_memory_service(user.client)

@@ -1,7 +1,7 @@
 "use client";
 
 import { AppShell } from "@/components/AppShell";
-import { ModeSettings } from "@/components/ModeSettings";
+import { SettingsTabs } from "@/components/settings/SettingsTabs";
 
 export default function SettingsPage() {
   return (
@@ -10,14 +10,14 @@ export default function SettingsPage() {
         <div className="mx-auto w-full max-w-5xl px-4 py-6 pb-16">
           <header>
             <p className="text-[11px] uppercase tracking-wide text-muted">Preferensi</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight">Pengaturan</h1>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight font-brand">Pengaturan</h1>
             <p className="mt-1 max-w-2xl text-[14px] text-muted">
-              Atur posisi dan perilaku Axtra untuk tiap fitur serta mode chat.
+              Atur peran dan skill Axtra untuk tiap fitur serta mode chat.
             </p>
           </header>
 
           <div className="mt-6">
-            <ModeSettings />
+            <SettingsTabs />
           </div>
         </div>
       </div>

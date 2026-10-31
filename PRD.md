@@ -154,17 +154,25 @@ Evaluasi harus membedakan antara fakta, indikasi, dan asumsi. Aktivitas seperti 
 
 Mendukung proses pengembangan ide menjadi proyek perangkat lunak.
 
-Tahapan:
-1. Eksplorasi ide dan kebutuhan.
-2. Klarifikasi masalah dan target pengguna.
-3. Penyusunan fitur dan prioritas.
-4. Penyusunan Product Requirements Document (PRD).
-5. Perancangan arsitektur dan struktur data.
-6. Penyusunan task breakdown.
-7. Bantuan implementasi kode.
-8. Review, debugging, dan evaluasi hasil.
+Alur utama:
 
-Axtra harus menyimpan keputusan penting, spesifikasi, teknologi yang dipilih, kendala, dan progres setiap proyek secara terpisah.
+```
+IDE MENTAH -> DISCOVERY -> SPESIFIKASI -> RENCANA IMPLEMENTASI
+-> EXTERNAL CODING AGENT -> VERIFIKASI -> ITERASI
+```
+
+Tahapan:
+1. **Ide mentah** — pengguna menulis apa yang ingin dibangun, masalah, target pengguna, serta preferensi/kendala. Kolom non-esensial boleh kosong.
+2. **Discovery terpandu AI** — percakapan persisten. Setiap turn: ringkasan pemahaman, maksimal tiga pertanyaan paling berdampak dengan pilihan/rekomendasi, dan pencatatan keputusan atau asumsi. Kategori yang dievaluasi dipilih dinamis (produk, pengguna, fitur, data, arsitektur, keamanan, UI/UX, testing, performa, deployment, biaya, aturan bisnis); kategori yang tidak relevan tidak dipaksakan.
+3. **Status informasi eksplisit** — `CONFIRMED`, `ASSUMED`, `RESEARCH`, `NEEDS_DECISION`, `VALIDATION_REQUIRED`. Asumsi tidak pernah otomatis diubah menjadi keputusan pengguna.
+4. **Dokumentasi progresif** — tujuh jenis artefak: `PRD`, `ARCHITECTURE`, `ACCEPTANCE_TEST_PLAN`, `UI_UX_SPEC`, `AGENT_INSTRUCTIONS`, `IMPLEMENTATION_PLAN`, `DEFINITION_OF_DONE`. Dokumen memakai Markdown, dapat diedit dan diregenerasi, memiliki versi, status review (`DRAFT`, `NEEDS_REVIEW`, `APPROVED`, `STALE`), dan riwayat yang tidak menimpa versi approved secara diam-diam.
+5. **Perencanaan implementasi** — spesifikasi yang cukup matang diubah menjadi task dengan ID, goal, scope, modul terdampak, dependencies, acceptance criteria, testing, dan operasi berisiko. Task masuk ke papan tugas proyek yang sudah ada sehingga mendukung eksekusi inkremental/prototype lebih dulu.
+6. **Handoff ke coding agent eksternal** — Axtra menyusun prompt yang dapat disalin berisi konteks task/proyek, requirement, acceptance criteria, testing, batasan keamanan, dan format laporan penyelesaian. Prompt memakai artefak approved yang relevan, bukan seluruh dokumentasi.
+7. **Verifikasi dan iterasi** — setiap task punya status verifikasi (`TODO`, `IN_PROGRESS`, `BLOCKED`, `NEEDS_REVIEW`, `DONE`) dan bukti (output test/log/ringkasan). Status `DONE` mensyaratkan bukti; Axtra tidak menandai lulus hanya karena model menyatakannya. Perubahan keputusan menandai dokumen terkait `STALE`, dan riwayat tetap disimpan.
+
+Batas MVP: tidak ada eksekusi terminal, pengeditan kode otonom, commit/push otomatis, deployment otomatis, atau integrasi GitHub write. Axtra hanya menghasilkan spesifikasi, rencana, prompt, dan mencatat bukti dari agen eksternal.
+
+Axtra harus menyimpan keputusan penting, spesifikasi, teknologi yang dipilih, kendala, dan progres setiap proyek secara terpisah. Vibe Coding adalah alur kerja di dalam Proyek, bukan pengganti manajemen proyek yang ada.
 
 ### 4.6 GitHub Integration
 
@@ -369,7 +377,7 @@ Strategi:
 - Integrasi GitHub read-only.
 - Sinkronisasi aktivitas.
 - Hubungan aktivitas dengan proyek.
-- Alur ide menjadi PRD dan task breakdown.
+- Alur ide menjadi PRD dan task breakdown. ✅ MVP Vibe Coding workspace (discovery, tujuh artefak berversi, task planning, prompt handoff, verifikasi) selesai. Integrasi GitHub write dan eksekusi otonom tetap di luar cakupan.
 
 ### Phase 6 — Research and Creator Tools
 - Web research.

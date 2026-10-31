@@ -26,6 +26,18 @@ import {
   type JobCv,
   type JobStatus,
 } from "@/lib/api";
+import { JobProfileLinks } from "@/components/JobProfileLinks";
+import {
+  OperationStatus,
+  type OperationStep,
+} from "@/components/ui/OperationStatus";
+
+const CV_UPLOAD_STEPS: OperationStep[] = [
+  { label: "Membaca file CV", at: 0 },
+  { label: "Mengunggah ke server", at: 1 },
+  { label: "Mengekstrak teks CV", at: 3 },
+  { label: "Menyimpan CV aktif", at: 8 },
+];
 
 export const JOB_STATUSES: JobStatus[] = [
   "draft",
@@ -48,16 +60,20 @@ export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
 };
 
 export function statusChipClass(status: JobStatus): string {
+  const base = "border bg-surface-muted";
   if (status === "rejected") {
-    return "border-danger/40 text-danger";
+    return `${base} border-danger/40 text-danger`;
   }
-  if (status === "offer" || status === "interview") {
-    return "border-foreground/40 bg-surface-muted text-foreground";
+  if (status === "offer") {
+    return `${base} border-success/40 text-success`;
+  }
+  if (status === "interview") {
+    return `${base} border-primary/40 text-primary`;
   }
   if (status === "withdrawn" || status === "draft") {
-    return "border-border text-muted";
+    return "border border-border bg-surface-muted text-muted";
   }
-  return "border-border text-foreground";
+  return "border border-border bg-surface-muted text-foreground";
 }
 
 const inputClass =
@@ -82,9 +98,16 @@ function ScoreChip({ label, value }: { label: string; value: number | null }) {
       </span>
     );
   }
+  const color =
+    value >= 70
+      ? "text-success"
+      : value >= 40
+        ? "text-primary"
+        : "text-danger";
   return (
-    <span className="rounded border border-border px-1.5 py-0.5 text-[11px] text-foreground">
-      {label} {value}%
+    <span className="rounded border border-border bg-surface-muted px-1.5 py-0.5 text-[10px] font-medium tabular-nums">
+      {label}{" "}
+      <span className={color}>{value}%</span>
     </span>
   );
 }
@@ -104,6 +127,7 @@ const EMPTY_FORM: JobForm = {
   deadline: "",
   createdAt: "",
   notes: "",
+  job_description: "",
 };
 
 export function JobTracker() {
@@ -121,6 +145,7 @@ export function JobTracker() {
   const [saving, setSaving] = useState(false);
 
   const [cvUploading, setCvUploading] = useState(false);
+  const [cvProgress, setCvProgress] = useState<number | null>(null);
   const [cvError, setCvError] = useState<string | null>(null);
   const cvInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -133,7 +158,11 @@ export function JobTracker() {
         getJobCv().catch(() => null),
       ]);
       setJobs(rows ?? []);
-      setCv(cvRow && cvRow.filename ? cvRow : null);
+      setCv(
+        cvRow && (cvRow.filename || cvRow.linkedin_url || cvRow.portfolio_url)
+          ? cvRow
+          : null,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat lamaran.");
     } finally {
@@ -194,15 +223,17 @@ export function JobTracker() {
 
   async function handleCvUpload(file: File) {
     setCvUploading(true);
+    setCvProgress(0);
     setCvError(null);
     try {
-      const uploaded = await uploadJobCv(file);
+      const uploaded = await uploadJobCv(file, setCvProgress);
       setCv(uploaded);
       setNotice("CV tersimpan. Analisa lamaran sekarang bisa dijalankan.");
     } catch (err) {
       setCvError(err instanceof Error ? err.message : "Upload CV gagal.");
     } finally {
       setCvUploading(false);
+      setCvProgress(null);
       if (cvInputRef.current) cvInputRef.current.value = "";
     }
   }
@@ -222,9 +253,10 @@ export function JobTracker() {
       <div className="mx-auto w-full max-w-5xl px-4 py-6 pb-16">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-[11px] uppercase tracking-wide text-muted">Karier</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight">Cari Kerja</h1>
-            <p className="mt-1 max-w-2xl text-[14px] text-muted">
+            <h1 className="text-3xl font-bold tracking-tight text-foreground font-brand">
+              Cari Kerja
+            </h1>
+            <p className="mt-2 max-w-[560px] text-[15px] italic leading-relaxed text-muted">
               Lacak lamaran, crawl lowongan, cocokkan CV, dan siapkan cover letter
               dalam satu tempat.
             </p>
@@ -240,7 +272,7 @@ export function JobTracker() {
         </div>
 
         {/* Stats */}
-        <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
             { label: "Total lamaran", value: stats.total },
             { label: "Sedang diproses", value: stats.active },
@@ -254,7 +286,17 @@ export function JobTracker() {
               <p className="text-[11px] uppercase tracking-wide text-muted">
                 {item.label}
               </p>
-              <p className="mt-0.5 text-xl font-semibold tabular-nums">
+              <p
+                className={`mt-0.5 text-2xl font-semibold tabular-nums tracking-tight ${
+                  item.label === "Offer"
+                    ? "text-warning"
+                    : item.label === "Interview"
+                      ? "text-primary"
+                      : item.label === "Sedang diproses"
+                        ? "text-foreground"
+                        : "text-muted"
+                }`}
+              >
                 {item.value}
               </p>
             </div>
@@ -264,9 +306,9 @@ export function JobTracker() {
         {/* CV card */}
         <section className="mt-4 rounded-lg border border-border bg-surface p-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-muted">
-                <FileText size={16} aria-hidden />
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-muted text-primary">
+                <FileText size={18} aria-hidden />
               </span>
               <div className="min-w-0">
                 <p className="text-[13px] font-medium">CV aktif</p>
@@ -310,12 +352,25 @@ export function JobTracker() {
               )}
             </div>
           </div>
+          {cvUploading && (
+            <OperationStatus
+              active
+              title="Mengunggah CV"
+              steps={CV_UPLOAD_STEPS}
+              progress={cvProgress}
+              note="Bar menunjukkan transfer file. Ekstraksi teks PDF/TXT berjalan di server setelah unggahan selesai."
+            />
+          )}
           {cvError && (
             <p role="alert" className="mt-2 text-[11px] text-danger">
               {cvError}
             </p>
           )}
         </section>
+
+        <div className="mt-4">
+          <JobProfileLinks cv={cv} onSaved={setCv} />
+        </div>
 
         {/* Create form */}
         {showForm && (
@@ -459,8 +514,32 @@ export function JobTracker() {
                 />
               </div>
               <div className="sm:col-span-2">
+                <label
+                  htmlFor="job-description"
+                  className="block text-[12px] text-muted"
+                >
+                  Deskripsi lowongan{" "}
+                  <span className="text-[11px] text-muted">
+                    (opsional, bisa diisi manual)
+                  </span>
+                </label>
+                <textarea
+                  id="job-description"
+                  value={form.job_description ?? ""}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      job_description: event.target.value,
+                    }))
+                  }
+                  rows={4}
+                  placeholder="Tanggung jawab, kualifikasi, teknologi, kata kunci. Boleh dikosongkan bila mau crawl dari link."
+                  className={`mt-1 resize-y ${inputClass}`}
+                />
+              </div>
+              <div className="sm:col-span-2">
                 <label htmlFor="job-notes" className="block text-[12px] text-muted">
-                  Catatan (opsional)
+                  Catatan (opsional, bukan deskripsi lowongan)
                 </label>
                 <textarea
                   id="job-notes"
@@ -558,9 +637,9 @@ export function JobTracker() {
           {loading && <LoadingState label="Memuat lamaran..." variant="cards" rows={4} />}
 
           {!loading && visible.length === 0 && (
-            <div className="rounded-lg border border-border px-4 py-10 text-center">
-              <Briefcase size={20} className="mx-auto text-muted" aria-hidden />
-              <p className="mt-2 text-[14px] text-muted">
+            <div className="rounded-lg border border-dashed border-border bg-surface-muted/30 px-4 py-12 text-center">
+              <Briefcase size={24} className="mx-auto text-muted/60" aria-hidden />
+              <p className="mt-3 text-[14px] text-muted">
                 {jobs.length === 0
                   ? "Belum ada lamaran. Tambahkan lamaran pertamamu."
                   : "Tidak ada lamaran yang cocok dengan filter."}
@@ -579,12 +658,12 @@ export function JobTracker() {
           )}
 
           {!loading && visible.length > 0 && (
-            <ul className="grid gap-2 sm:grid-cols-2">
+            <ul className="grid gap-3 sm:grid-cols-2">
               {visible.map((job) => (
                 <li key={job.id}>
                   <Link
                     href={`/jobs/${job.id}`}
-                    className="group flex h-full flex-col rounded-lg border border-border bg-surface p-3.5 transition-colors duration-150 hover:bg-surface-muted"
+                    className="group flex h-full flex-col rounded-lg border border-border bg-surface p-4 transition-all duration-200 hover:border-primary/30 hover:bg-surface-muted hover:shadow-sm"
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">

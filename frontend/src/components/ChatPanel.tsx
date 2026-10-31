@@ -9,6 +9,7 @@ import {
   Globe,
   Link2,
   Loader2,
+  Search,
   Square,
   Terminal,
   Trash2,
@@ -34,6 +35,7 @@ import {
   openRoute,
   removeAttachment,
   removeSource,
+  searchSources,
   send,
   setDraft,
   setPendingCommand,
@@ -80,6 +82,8 @@ export function ChatPanel({
 
   // Riset Web: the URL the user wants to crawl next.
   const [urlInput, setUrlInput] = useState("");
+  // Riset Web: Firecrawl web-search query.
+  const [queryInput, setQueryInput] = useState("");
   // Riset Web: per-source "save to memory" feedback.
   const [savingSourceId, setSavingSourceId] = useState<string | null>(null);
   const [sourceNotice, setSourceNotice] = useState<string | null>(null);
@@ -332,6 +336,14 @@ export function ChatPanel({
     const url = urlInput.trim();
     setUrlInput("");
     void crawlSource(activeKey, url);
+  }
+
+  function handleSearch(event: React.FormEvent) {
+    event.preventDefault();
+    if (!activeKey || !queryInput.trim()) return;
+    const query = queryInput.trim();
+    setQueryInput("");
+    void searchSources(activeKey, query);
   }
 
   function chooseCommand(command: ChatCommand) {
@@ -623,7 +635,33 @@ export function ChatPanel({
               <Globe size={14} aria-hidden />
               <span>Sumber web</span>
             </div>
-            <form onSubmit={handleCrawl} className="mt-2 flex items-center gap-1.5">
+            <form onSubmit={handleSearch} className="mt-2 flex items-center gap-1.5">
+              <label htmlFor="search-query" className="sr-only">
+                Kata kunci pencarian web
+              </label>
+              <input
+                id="search-query"
+                type="search"
+                value={queryInput}
+                onChange={(event) => setQueryInput(event.target.value)}
+                placeholder="Cari di web: mis. berita AI terbaru"
+                disabled={slice.searching}
+                className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-2.5 text-[13px] text-foreground outline-none placeholder:text-muted focus:border-foreground/40 disabled:opacity-50"
+              />
+              <button
+                type="submit"
+                disabled={!queryInput.trim() || slice.searching}
+                className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+              >
+                {slice.searching ? (
+                  <Loader2 size={14} className="animate-spin" aria-hidden />
+                ) : (
+                  <Search size={14} aria-hidden />
+                )}
+                {slice.searching ? "Mencari..." : "Cari"}
+              </button>
+            </form>
+            <form onSubmit={handleCrawl} className="mt-1.5 flex items-center gap-1.5">
               <label htmlFor="crawl-url" className="sr-only">
                 URL halaman web
               </label>
@@ -632,7 +670,7 @@ export function ChatPanel({
                 type="url"
                 value={urlInput}
                 onChange={(event) => setUrlInput(event.target.value)}
-                placeholder="https://contoh.com/artikel"
+                placeholder="atau crawl URL: https://contoh.com/artikel"
                 disabled={slice.crawling}
                 className="h-9 min-w-0 flex-1 rounded-lg border border-border bg-background px-2.5 text-[13px] text-foreground outline-none placeholder:text-muted focus:border-foreground/40 disabled:opacity-50"
               />
@@ -695,7 +733,7 @@ export function ChatPanel({
               </ul>
             ) : (
               <p className="mt-2 text-[11px] text-muted">
-                Masukkan URL lalu crawl. Sumber dipakai sebagai konteks jawaban.
+                Cari di web atau crawl URL. Sumber dipakai sebagai konteks jawaban.
               </p>
             )}
 

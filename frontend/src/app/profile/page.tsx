@@ -70,7 +70,7 @@ export default function ProfilePage() {
     <AppShell>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="mx-auto w-full max-w-xl px-4 py-6 pb-16">
-          <h1 className="text-2xl font-semibold tracking-tight">Profil</h1>
+          <h1 className="text-2xl font-semibold tracking-tight font-brand">Profil</h1>
           <p className="mt-1 text-[14px] text-muted">
             Identitas dasar yang menjadi konteks percakapan. Fakta lain dikumpulkan otomatis
             sebagai memori.

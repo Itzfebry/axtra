@@ -47,7 +47,7 @@ class MemoryExtractor:
         self._default_model = default_model
 
     async def extract(
-        self, user_message: str, recent_context: str = ""
+        self, user_message: str, recent_context: str = "", persona: str = ""
     ) -> tuple[list[ExtractedMemory], dict | None, str | None]:
         """Best-effort extraction; never raises.
 
@@ -57,6 +57,8 @@ class MemoryExtractor:
         prompt = MEMORY_EXTRACTION_PROMPT.format(
             user_message=user_message.strip()[:6000], recent_context=recent_context
         )
+        if persona:
+            prompt = persona + "\n\n" + prompt
 
         for model in _EXTRACT_MODEL_FALLBACK_ORDER:
             try:

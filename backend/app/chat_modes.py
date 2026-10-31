@@ -532,6 +532,7 @@ def default_mode_settings(mode: str) -> dict[str, Any]:
         "roles": [roles[0]["id"]],
         "role_note": "",
         "behavior": behaviors[0]["id"],
+        "skills": [],
     }
 
 
@@ -568,6 +569,16 @@ def resolve_mode_settings(preferences: Any, mode: str) -> dict[str, Any]:
     note = stored.get("role_note")
     if isinstance(note, str):
         settings["role_note"] = note.strip()[:500]
+
+    stored_skills = stored.get("skills")
+    if isinstance(stored_skills, list):
+        settings["skills"] = list(
+            dict.fromkeys(
+                str(item)[:64]
+                for item in stored_skills
+                if isinstance(item, str) and str(item).strip()
+            )
+        )
     return settings
 
 

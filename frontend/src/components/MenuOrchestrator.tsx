@@ -160,11 +160,11 @@ export function MenuOrchestrator({
                   className="h-9 w-9 rounded-lg"
                 />
                 <div>
-                  <h1 className="text-2xl font-semibold tracking-tight">Axtra</h1>
+                  <h1 className="text-2xl font-semibold tracking-tight font-brand">Axtra</h1>
                   <p className="text-[13px] text-muted">Agen AI personal</p>
                 </div>
               </div>
-              <p className="mt-4 max-w-lg text-[14px] leading-relaxed text-muted">
+              <p className="mt-4 max-w-lg text-[14px] italic leading-relaxed text-muted">
                 Mulai percakapan, kelola proyek, atau cari kerja. Tulis tujuanmu di kolom
                 bawah dan Axtra akan mengarahkan ke tool yang tepat.
               </p>

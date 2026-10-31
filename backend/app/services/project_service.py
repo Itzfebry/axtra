@@ -35,12 +35,18 @@ def _row_to_project(row: dict[str, Any]) -> ProjectOut:
         tech_stack = [str(item) for item in raw_stack if str(item).strip()]
     else:
         tech_stack = []
+    raw_labels = row.get("labels")
+    if isinstance(raw_labels, list):
+        labels = [str(item) for item in raw_labels if str(item).strip()]
+    else:
+        labels = []
     return ProjectOut(
         id=row["id"],
         name=row.get("name", ""),
         description=row.get("description", "") or "",
         status=row.get("status", "idea"),
         tech_stack=tech_stack,
+        labels=labels,
         repo_url=row.get("repo_url"),
         notes=row.get("notes", "") or "",
         source=row.get("source", "manual"),
@@ -58,12 +64,21 @@ def _row_to_project(row: dict[str, Any]) -> ProjectOut:
         health_summary=row.get("health_summary"),
         health_generated_at=row.get("health_generated_at"),
         health_stale=bool(row.get("health_stale")),
+        health_history=[
+            item for item in (row.get("health_history") or []) if isinstance(item, dict)
+        ],
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
     )
 
 
 def _row_to_task(row: dict[str, Any]) -> ProjectTaskOut:
+    def _list(key: str) -> list[str]:
+        value = row.get(key)
+        if isinstance(value, list):
+            return [str(item) for item in value if str(item).strip()]
+        return []
+
     return ProjectTaskOut(
         id=row["id"],
         project_id=row["project_id"],
@@ -76,6 +91,16 @@ def _row_to_task(row: dict[str, Any]) -> ProjectTaskOut:
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
         completed_at=row.get("completed_at"),
+        vibe_session_id=row.get("vibe_session_id"),
+        vibe_task_key=row.get("vibe_task_key"),
+        acceptance_criteria=_list("acceptance_criteria"),
+        dependencies=_list("dependencies"),
+        affected_modules=_list("affected_modules"),
+        doc_refs=_list("doc_refs"),
+        testing_notes=row.get("testing_notes", "") or "",
+        verification_status=row.get("verification_status", "TODO") or "TODO",
+        verification_evidence=row.get("verification_evidence", "") or "",
+        verification_notes=row.get("verification_notes", "") or "",
     )
 
 
@@ -207,6 +232,7 @@ class ProjectService:
         description: str = "",
         status_: str = "idea",
         tech_stack: list[str] | None = None,
+        labels: list[str] | None = None,
         repo_url: str | None = None,
         notes: str = "",
         source: str = "manual",
@@ -218,6 +244,7 @@ class ProjectService:
             "description": description,
             "status": status_,
             "tech_stack": tech_stack or [],
+            "labels": labels or [],
             "repo_url": repo_url,
             "notes": notes,
             "source": source,
@@ -519,40 +546,31 @@ class ProjectService:
     async def reorder_tasks(
         self, project_id: str, items: list[dict[str, Any]]
     ) -> list[ProjectTaskOut]:
-        """Apply a board reorder: status + position for each task in one batch.
+        """Apply a board reorder: status + position for each moved task.
 
-        A single ``upsert`` keeps the whole board consistent: either every moved
-        task is saved or none is, instead of a half-applied loop of updates.
+        A per-row ``update`` is used instead of an ``upsert`` because
+        ``project_tasks.title`` is ``not null`` with no default: Postgres
+        enforces NOT NULL on the proposed insert tuple even on
+        ``ON CONFLICT DO UPDATE``, so an upsert that omits the title (as a pure
+        reorder must) fails with a constraint error.
         """
         now = datetime.now(timezone.utc).isoformat()
-        # Restrict to tasks that actually belong to this project so a stray or
-        # cross-project id cannot be reassigned by the upsert.
-        existing = (
-            await self._client.table("project_tasks")
-            .select("id")
-            .eq("project_id", project_id)
-            .execute()
-        )
-        allowed = {row.get("id") for row in existing.data or []}
-        payload: list[dict[str, Any]] = []
         for item in items:
             task_id = item.get("id")
-            if not task_id or task_id not in allowed:
+            if not task_id:
                 continue
             status_ = item.get("status", "todo")
-            payload.append(
-                {
-                    "id": task_id,
-                    "project_id": project_id,
-                    "status": status_,
-                    "position": int(item.get("position") or 0),
-                    "completed_at": now if status_ == "done" else None,
-                }
-            )
-        if payload:
             await (
                 self._client.table("project_tasks")
-                .upsert(payload, on_conflict="id")
+                .update(
+                    {
+                        "status": status_,
+                        "position": int(item.get("position") or 0),
+                        "completed_at": now if status_ == "done" else None,
+                    }
+                )
+                .eq("id", task_id)
+                .eq("project_id", project_id)
                 .execute()
             )
         return await self.list_tasks(project_id)

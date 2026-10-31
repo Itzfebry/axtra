@@ -16,6 +16,7 @@ import {
   deleteResearchSource as apiDeleteResearchSource,
   listDocuments,
   listResearchSources,
+  searchResearch as apiSearchResearch,
   streamChat,
   uploadDocument as apiUploadDocument,
   type DocumentRow,
@@ -69,6 +70,7 @@ export type ChatSlice = {
   sources: ResearchSource[];
   sourcesLoaded: boolean;
   crawling: boolean;
+  searching: boolean;
   crawlError: string | null;
   crawlNotice: string | null;
 };
@@ -141,6 +143,7 @@ function blankSlice(
     sources: [],
     sourcesLoaded: false,
     crawling: false,
+    searching: false,
     crawlError: null,
     crawlNotice: null,
   };
@@ -599,6 +602,51 @@ export async function crawlSource(key: string, url: string) {
       updateSlice(targetKey, {
         crawling: false,
         crawlError: error instanceof Error ? error.message : "Crawl gagal.",
+      });
+    }
+  }
+}
+
+export async function searchSources(key: string, query: string) {
+  const slice = state.slices[key];
+  if (!slice || slice.searching) return;
+  const trimmed = query.trim();
+  if (!trimmed) return;
+  updateSlice(key, { searching: true, crawlError: null, crawlNotice: null });
+  let targetKey = key;
+  try {
+    const rows = await apiSearchResearch(trimmed, slice.conversationId);
+    if (!state.slices[key]) return;
+    if (!slice.conversationId && rows.length > 0) {
+      targetKey = rekey(key, rows[0].conversation_id, slice.mode);
+    }
+    const target = state.slices[targetKey];
+    if (target) {
+      const seen = new Set(target.sources.map((source) => source.id));
+      const fresh = rows.filter((source) => !seen.has(source.id));
+      commit({
+        ...state,
+        slices: {
+          ...state.slices,
+          [targetKey]: {
+            ...target,
+            sources: [...target.sources, ...fresh],
+            sourcesLoaded: true,
+            searching: false,
+            crawlError: null,
+            crawlNotice:
+              fresh.length > 0
+                ? `${fresh.length} hasil pencarian ditambahkan.`
+                : "Tidak ada hasil baru untuk ditambahkan.",
+          },
+        },
+      });
+    }
+  } catch (error) {
+    if (state.slices[targetKey]) {
+      updateSlice(targetKey, {
+        searching: false,
+        crawlError: error instanceof Error ? error.message : "Pencarian gagal.",
       });
     }
   }

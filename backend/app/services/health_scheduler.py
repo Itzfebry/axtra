@@ -56,6 +56,7 @@ async def _run(project_id: str, user_id: str, delay: float) -> None:
             return
 
         from app.memory_service_provider import build_project_analyzer
+        from app.services.feature_persona import load_feature_persona
         from app.services.project_service import ProjectService
         from app.supabase_client import get_owner_client
 
@@ -69,7 +70,10 @@ async def _run(project_id: str, user_id: str, delay: float) -> None:
         analyzer = build_project_analyzer()
         tasks = await service.list_tasks(project_id)
         documents = await service.list_documents(project_id)
-        summary = await analyzer.analyze(project, tasks, documents)
+        persona = await load_feature_persona(
+            client, "projects:health", user_id=user_id
+        )
+        summary = await analyzer.analyze(project, tasks, documents, persona)
         await service.update(
             user_id,
             project_id,

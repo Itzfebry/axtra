@@ -97,6 +97,80 @@ class CrawlProviderSettingsUpdate(BaseModel):
     provider: Literal["httpx", "firecrawl"]
 
 
+# ---------------------------------------------------------------------------
+# Per-feature roles, skills & instruction (Settings page)
+# ---------------------------------------------------------------------------
+class FeatureSettingsUpdate(BaseModel):
+    roles: str = Field(default="", max_length=500)
+    skills: str = Field(default="", max_length=500)
+    instruction: str = Field(default="", max_length=1000)
+    behavior: str = Field(default="", max_length=60)
+    skill_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
+# ---------------------------------------------------------------------------
+# AI skills
+# ---------------------------------------------------------------------------
+SkillSource = Literal["custom", "imported", "ai_generated"]
+SkillStatus = Literal["draft", "active", "disabled"]
+
+
+class SkillCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    slug: str | None = Field(default=None, max_length=80)
+    description: str = Field(default="", max_length=500)
+    category: str = Field(default="general", max_length=60)
+    content: str = Field(min_length=1, max_length=40000)
+    version: str = Field(default="1", max_length=20)
+    source: SkillSource = "custom"
+    license: str = Field(default="", max_length=120)
+    status: SkillStatus = "active"
+
+
+class SkillUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    slug: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
+    category: str | None = Field(default=None, max_length=60)
+    content: str | None = Field(default=None, min_length=1, max_length=40000)
+    version: str | None = Field(default=None, max_length=20)
+    source: SkillSource | None = None
+    license: str | None = Field(default=None, max_length=120)
+    status: SkillStatus | None = None
+
+
+class SkillSummary(BaseModel):
+    id: str
+    slug: str
+    name: str
+    description: str = ""
+    category: str = "general"
+    version: str = "1"
+    source: SkillSource = "custom"
+    license: str = ""
+    status: SkillStatus = "active"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class SkillOut(SkillSummary):
+    content: str
+
+
+class SkillParseRequest(BaseModel):
+    raw: str = Field(min_length=1, max_length=60000)
+    fallback_name: str = Field(default="", max_length=120)
+
+
+class SkillParseOut(BaseModel):
+    name: str
+    slug: str
+    description: str = ""
+    license: str = ""
+    metadata: dict[str, str] = Field(default_factory=dict)
+    content: str
+
+
 class DocumentOut(BaseModel):
     id: str
     conversation_id: str
@@ -112,6 +186,12 @@ class DocumentOut(BaseModel):
 class ResearchCrawlRequest(BaseModel):
     url: str = Field(min_length=1, max_length=1000)
     conversation_id: str | None = None
+
+
+class ResearchSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=300)
+    conversation_id: str | None = None
+    limit: int | None = Field(default=None, ge=1, le=10)
 
 
 class ResearchSourceOut(BaseModel):
@@ -166,6 +246,12 @@ class JobApplicationUpdate(BaseModel):
     cover_letter: str | None = Field(default=None, max_length=20000)
 
 
+class TokenUsageOut(BaseModel):
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
 class JobApplicationOut(BaseModel):
     id: str
     company: str
@@ -192,17 +278,241 @@ class JobApplicationOut(BaseModel):
     updated_at: datetime | None = None
     # Transient: set only on the crawl response (provider fallback notice).
     crawl_notice: str | None = None
+    # Transient: token usage for the analyze/cover-letter call that produced
+    # this response. Not persisted, so a page reload will not show it.
+    token_usage: TokenUsageOut | None = None
 
 
 class JobCvOut(BaseModel):
     filename: str = ""
     summary: str = ""
     char_count: int = 0
+    linkedin_url: str = ""
+    portfolio_url: str = ""
+    portfolio_chars: int = 0
+    linkedin_chars: int = 0
+    links_updated_at: datetime | None = None
     updated_at: datetime | None = None
+
+
+class JobProfileLinksUpdate(BaseModel):
+    linkedin_url: str = Field(default="", max_length=1000)
+    portfolio_url: str = Field(default="", max_length=1000)
+    portfolio_content: str | None = Field(default=None, max_length=40000)
+    linkedin_content: str | None = Field(default=None, max_length=40000)
+
+
+JobProfileSource = Literal["cv", "portfolio", "linkedin"]
+
+
+class JobAnalyzeRequest(BaseModel):
+    sources: list[JobProfileSource] = Field(
+        default_factory=lambda: ["cv"], max_length=3
+    )
 
 
 class JobCrawlRequest(BaseModel):
     url: str | None = Field(default=None, max_length=1000)
+
+
+# ---------------------------------------------------------------------------
+# LLM providers & models (Settings → Provider)
+# ---------------------------------------------------------------------------
+class ProviderOut(BaseModel):
+    id: str
+    label: str
+    base_url: str
+    docs_url: str = ""
+    notes: str = ""
+    # Whether a server-side env key is configured for this provider.
+    env_key: bool = False
+    # Whether the user stored their own key (value never returned).
+    user_key: bool = False
+    key_source: str = "none"  # user | env | none
+    key_masked: str = ""
+    rich_metadata: bool = False
+    active: bool = False
+    selected_model: str = ""
+    # True for user-added OpenAI-compatible endpoints (deletable).
+    custom: bool = False
+    # Image generation slot (OpenRouter-style Image API), separate from text.
+    active_image: bool = False
+    selected_image_model: str = ""
+
+
+class ProviderCreate(BaseModel):
+    label: str = Field(min_length=1, max_length=60)
+    base_url: str = Field(min_length=1, max_length=400)
+    api_key: str = Field(default="", max_length=400)
+    model: str = Field(default="", max_length=200)
+
+
+class ProviderKeyUpdate(BaseModel):
+    api_key: str = Field(min_length=1, max_length=400)
+    model: str = Field(default="", max_length=200)
+
+
+class ProviderSelectionUpdate(BaseModel):
+    provider: str = Field(min_length=1, max_length=40)
+    model: str = Field(default="", max_length=200)
+
+
+class ProviderImageSelectionUpdate(BaseModel):
+    provider: str = Field(min_length=1, max_length=40)
+    model: str = Field(default="", max_length=200)
+
+
+class ProviderModelOut(BaseModel):
+    id: str
+    name: str = ""
+    context_window: int | None = None
+    modalities: list[str] = Field(default_factory=list)
+    pricing: dict[str, float] | None = None
+    free: bool = False
+    tags: list[str] = Field(default_factory=list)
+
+
+class ProviderModelsOut(BaseModel):
+    provider: str
+    label: str
+    cached: bool = False
+    count: int = 0
+    models: list[ProviderModelOut] = Field(default_factory=list)
+
+
+class ProviderPingOut(BaseModel):
+    ok: bool
+    status: int | None = None
+    latency_ms: int | None = None
+    detail: str = ""
+
+
+class ProviderRecommendationOut(BaseModel):
+    model: str
+    reason: str
+    free: bool = False
+    tags: list[str] = Field(default_factory=list)
+
+
+class ProviderRecommendationsOut(BaseModel):
+    provider: str
+    label: str
+    recommendations: list[ProviderRecommendationOut] = Field(default_factory=list)
+
+
+class LLMQuotaOut(BaseModel):
+    provider: str
+    model: str = ""
+    minute_tokens: int = 0
+    minute_limit: int = 0
+    day_tokens: int = 0
+    day_limit: int = 0
+    day_reset_at: datetime | None = None
+    # Raw rate-limit headers from the provider's last response (Groq exposes
+    # these). Empty when the provider does not publish quota details.
+    rate_limit: dict[str, str] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Image generation (OpenRouter-style Image API)
+# ---------------------------------------------------------------------------
+class ImageModelOut(BaseModel):
+    id: str
+    name: str = ""
+    # Raw ``supported_parameters`` descriptors (param -> {type, values/min/max}).
+    capabilities: dict[str, Any] = Field(default_factory=dict)
+    supports_streaming: bool = False
+    input_modalities: list[str] = Field(default_factory=list)
+    output_modalities: list[str] = Field(default_factory=list)
+
+
+class ImageModelsOut(BaseModel):
+    provider: str
+    count: int = 0
+    models: list[ImageModelOut] = Field(default_factory=list)
+
+
+class ImageConfigOut(BaseModel):
+    provider: str
+    provider_label: str
+    model: str
+    key_ok: bool = False
+    aspect_ratios: list[str] = Field(default_factory=list)
+    resolutions: list[str] = Field(default_factory=list)
+    qualities: list[str] = Field(default_factory=list)
+    output_formats: list[str] = Field(default_factory=list)
+    backgrounds: list[str] = Field(default_factory=list)
+    max_n: int = 4
+    daily_limit: int = 0
+
+
+class ImageGenerateRequest(BaseModel):
+    prompt: str = Field(min_length=1, max_length=4000)
+    provider: str = Field(default="", max_length=40)
+    model: str = Field(default="", max_length=200)
+    aspect_ratio: str = Field(default="", max_length=20)
+    resolution: str = Field(default="", max_length=10)
+    quality: str = Field(default="", max_length=10)
+    output_format: str = Field(default="", max_length=10)
+    background: str = Field(default="", max_length=12)
+    output_compression: int | None = Field(default=None, ge=0, le=100)
+    seed: int | None = Field(default=None, ge=0)
+    # Cloudflare Workers AI diffusion steps (ignored by other providers).
+    steps: int | None = Field(default=None, ge=1, le=20)
+    # Reference images (image-to-image). Data URLs or HTTP(S) URLs.
+    input_references: list[str] = Field(default_factory=list, max_length=8)
+    # Provider routing (OpenRouter provider object).
+    provider_only: list[str] = Field(default_factory=list, max_length=20)
+    provider_order: list[str] = Field(default_factory=list, max_length=20)
+    provider_ignore: list[str] = Field(default_factory=list, max_length=20)
+    provider_sort: str = Field(default="", max_length=20)
+    provider_allow_fallbacks: bool | None = None
+    n: int = Field(default=1, ge=1, le=10)
+    stream: bool = False
+
+
+class ImageEndpointOut(BaseModel):
+    provider_name: str = ""
+    provider_slug: str = ""
+    provider_tag: str | None = None
+    supports_streaming: bool = False
+    supported_parameters: dict[str, Any] = Field(default_factory=dict)
+    pricing: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ImageEndpointsOut(BaseModel):
+    provider: str
+    model: str
+    endpoints: list[ImageEndpointOut] = Field(default_factory=list)
+
+
+class ImageResultOut(BaseModel):
+    data_url: str
+    media_type: str = "image/png"
+
+
+class ImageGenerateOut(BaseModel):
+    provider: str
+    model: str
+    images: list[ImageResultOut] = Field(default_factory=list)
+    usage: dict[str, Any] = Field(default_factory=dict)
+
+
+class ImageCreditsOut(BaseModel):
+    # False when the key cannot read credits (normal keys are not management
+    # keys) or the provider does not expose a credits endpoint.
+    available: bool = False
+    total_credits: float | None = None
+    total_usage: float | None = None
+    remaining: float | None = None
+    detail: str = ""
+
+
+class ImageUsageOut(BaseModel):
+    day_images: int = 0
+    day_cost: float = 0.0
+    day_limit: int = 0
+    day_reset_at: datetime | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +572,7 @@ class ProjectCreate(BaseModel):
     description: str = Field(default="", max_length=8000)
     status: ProjectStatus = "idea"
     tech_stack: list[str] = Field(default_factory=list, max_length=40)
+    labels: list[str] = Field(default_factory=list, max_length=30)
     repo_url: str | None = Field(default=None, max_length=500)
     notes: str = Field(default="", max_length=20000)
 
@@ -271,6 +582,7 @@ class ProjectUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=8000)
     status: ProjectStatus | None = None
     tech_stack: list[str] | None = Field(default=None, max_length=40)
+    labels: list[str] | None = Field(default=None, max_length=30)
     repo_url: str | None = Field(default=None, max_length=500)
     notes: str | None = Field(default=None, max_length=20000)
 
@@ -281,6 +593,7 @@ class ProjectOut(BaseModel):
     description: str = ""
     status: ProjectStatus = "idea"
     tech_stack: list[str] = Field(default_factory=list)
+    labels: list[str] = Field(default_factory=list)
     repo_url: str | None = None
     notes: str = ""
     source: str = "manual"
@@ -298,6 +611,7 @@ class ProjectOut(BaseModel):
     health_summary: str | None = None
     health_generated_at: datetime | None = None
     health_stale: bool = False
+    health_history: list[dict[str, Any]] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -331,6 +645,31 @@ class ProjectAskOut(BaseModel):
 
 ProjectTaskStatus = Literal["todo", "doing", "done"]
 ProjectTaskPriority = Literal["low", "medium", "high"]
+
+# ---------------------------------------------------------------------------
+# Vibe Coding workspace
+# ---------------------------------------------------------------------------
+VibeArtifactKind = Literal[
+    "PRD",
+    "ARCHITECTURE",
+    "ACCEPTANCE_TEST_PLAN",
+    "UI_UX_SPEC",
+    "AGENT_INSTRUCTIONS",
+    "IMPLEMENTATION_PLAN",
+    "DEFINITION_OF_DONE",
+]
+VibeArtifactStatus = Literal["DRAFT", "NEEDS_REVIEW", "APPROVED", "STALE"]
+VibeDecisionStatus = Literal[
+    "CONFIRMED",
+    "ASSUMED",
+    "RESEARCH",
+    "NEEDS_DECISION",
+    "VALIDATION_REQUIRED",
+]
+VibeVerificationStatus = Literal[
+    "TODO", "IN_PROGRESS", "BLOCKED", "NEEDS_REVIEW", "DONE"
+]
+VibeStage = Literal["discovery", "specification", "planning", "verification"]
 
 
 class ProjectTaskCreate(BaseModel):
@@ -370,6 +709,17 @@ class ProjectTaskOut(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     completed_at: datetime | None = None
+    # Vibe Coding plan/verification metadata (nullable for manual tasks).
+    vibe_session_id: str | None = None
+    vibe_task_key: str | None = None
+    acceptance_criteria: list[str] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
+    affected_modules: list[str] = Field(default_factory=list)
+    doc_refs: list[str] = Field(default_factory=list)
+    testing_notes: str = ""
+    verification_status: VibeVerificationStatus = "TODO"
+    verification_evidence: str = ""
+    verification_notes: str = ""
 
 
 class ProjectConversationOut(BaseModel):
@@ -492,12 +842,19 @@ class OrchestratorOut(BaseModel):
 # ---------------------------------------------------------------------------
 # Token usage
 # ---------------------------------------------------------------------------
+class UsageModelUsage(BaseModel):
+    model: str
+    tokens: int = 0
+
+
 class UsageOut(BaseModel):
     minute_tokens: int = 0
     day_tokens: int = 0
     minute_limit: int = 0
     day_limit: int = 0
     model: str
+    provider: str = ""
+    by_model: list[UsageModelUsage] = Field(default_factory=list)
     timezone: str = "Asia/Jakarta"
     day_reset_at: datetime
 
@@ -511,3 +868,139 @@ class HealthOut(BaseModel):
     environment: str
     llm_provider: str
     embedding_provider: str
+
+
+# ---------------------------------------------------------------------------
+# Vibe Coding workflows
+# ---------------------------------------------------------------------------
+class VibeIdea(BaseModel):
+    idea: str = Field(default="", max_length=8000)
+    problem: str = Field(default="", max_length=4000)
+    target_users: str = Field(default="", max_length=2000)
+    constraints: str = Field(default="", max_length=4000)
+
+
+class VibeSessionCreate(VibeIdea):
+    title: str = Field(default="", max_length=200)
+
+
+class VibeSessionUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    idea: str | None = Field(default=None, max_length=8000)
+    problem: str | None = Field(default=None, max_length=4000)
+    target_users: str | None = Field(default=None, max_length=2000)
+    constraints: str | None = Field(default=None, max_length=4000)
+    summary: str | None = Field(default=None, max_length=8000)
+    stage: VibeStage | None = None
+
+
+class VibeSessionOut(BaseModel):
+    id: str
+    project_id: str
+    title: str = ""
+    raw_idea: dict[str, Any] = Field(default_factory=dict)
+    stage: VibeStage = "discovery"
+    summary: str = ""
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class VibeMessageCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=8000)
+
+
+class VibeQuestion(BaseModel):
+    question: str = ""
+    options: list[str] = Field(default_factory=list)
+    recommended: str | None = None
+
+
+class VibeMessageOut(BaseModel):
+    id: str
+    session_id: str
+    role: Literal["user", "assistant"]
+    content: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime | None = None
+
+
+class VibeDecisionCreate(BaseModel):
+    category: str = Field(default="general", max_length=60)
+    statement: str = Field(min_length=1, max_length=2000)
+    status: VibeDecisionStatus = "NEEDS_DECISION"
+    rationale: str = Field(default="", max_length=2000)
+    source: str = Field(default="manual", max_length=40)
+
+
+class VibeDecisionUpdate(BaseModel):
+    category: str | None = Field(default=None, max_length=60)
+    statement: str | None = Field(default=None, min_length=1, max_length=2000)
+    status: VibeDecisionStatus | None = None
+    rationale: str | None = Field(default=None, max_length=2000)
+
+
+class VibeDecisionOut(BaseModel):
+    id: str
+    session_id: str
+    category: str = "general"
+    statement: str
+    status: VibeDecisionStatus = "ASSUMED"
+    rationale: str = ""
+    source: str = "ai"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class VibeDiscoveryReply(BaseModel):
+    message: VibeMessageOut
+    decisions: list[VibeDecisionOut] = Field(default_factory=list)
+    questions: list[VibeQuestion] = Field(default_factory=list)
+
+
+class VibeArtifactGenerate(BaseModel):
+    instructions: str = Field(default="", max_length=4000)
+
+
+class VibeArtifactUpdate(BaseModel):
+    content: str = Field(min_length=1, max_length=100000)
+    note: str = Field(default="", max_length=500)
+
+
+class VibeArtifactOut(BaseModel):
+    id: str
+    session_id: str
+    project_id: str
+    kind: VibeArtifactKind
+    title: str = ""
+    content: str = ""
+    status: VibeArtifactStatus = "DRAFT"
+    version: int = 1
+    generated_by: str = "ai"
+    reviewed_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class VibeArtifactVersionOut(BaseModel):
+    id: str
+    artifact_id: str
+    version: int
+    content: str = ""
+    status: VibeArtifactStatus = "DRAFT"
+    note: str = ""
+    created_at: datetime | None = None
+
+
+class VibeTaskGenerateRequest(BaseModel):
+    max_tasks: int = Field(default=8, ge=1, le=12)
+
+
+class VibeTaskPromptOut(BaseModel):
+    task_id: str
+    prompt: str
+
+
+class VibeVerificationUpdate(BaseModel):
+    status: VibeVerificationStatus
+    evidence: str = Field(default="", max_length=20000)
+    notes: str = Field(default="", max_length=5000)

@@ -5,22 +5,33 @@ import { LoadingState } from "@/components/ui/LoadingState";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   ArrowLeft,
   Check,
   Copy,
+  Download,
   ExternalLink,
   FileText,
   Globe,
+  ListChecks,
   Loader2,
   Pencil,
   Save,
   Sparkles,
+  Target,
   Trash2,
+  TrendingUp,
   Upload,
   Wand2,
 } from "lucide-react";
 
 import { Markdown } from "@/components/Markdown";
+import { emitUsageChanged } from "@/components/UsageMeter";
+import { JobProfileLinks } from "@/components/JobProfileLinks";
+import {
+  OperationStatus,
+  type OperationStep,
+} from "@/components/ui/OperationStatus";
 import {
   JOB_STATUSES,
   JOB_STATUS_LABEL,
@@ -38,11 +49,46 @@ import {
   uploadJobCv,
   type JobApplication,
   type JobCv,
+  type JobProfileSource,
   type JobStatus,
 } from "@/lib/api";
 
 const inputClass =
   "w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-foreground outline-none placeholder:text-muted focus:border-foreground/40";
+
+const SOURCE_LABEL: Record<JobProfileSource, string> = {
+  cv: "CV",
+  portfolio: "Portfolio",
+  linkedin: "LinkedIn",
+};
+const SOURCE_ORDER: JobProfileSource[] = ["cv", "portfolio", "linkedin"];
+
+const CRAWL_STEPS: OperationStep[] = [
+  { label: "Menyiapkan URL", at: 0 },
+  { label: "Menghubungi halaman lowongan", at: 1 },
+  { label: "Mengekstrak konten utama", at: 5 },
+  { label: "Menyimpan deskripsi lowongan", at: 20 },
+];
+
+const ANALYZE_STEPS: OperationStep[] = [
+  { label: "Menyiapkan konteks CV dan lowongan", at: 0 },
+  { label: "Mengirim data ke model AI", at: 1 },
+  { label: "Menyusun analisa dan skor", at: 5 },
+  { label: "Menyimpan hasil analisa", at: 25 },
+];
+
+const COVER_STEPS: OperationStep[] = [
+  { label: "Menyiapkan konteks dan detail lowongan", at: 0 },
+  { label: "Menulis surat lamaran", at: 1 },
+  { label: "Menyimpan surat", at: 20 },
+];
+
+const CV_UPLOAD_STEPS: OperationStep[] = [
+  { label: "Membaca file CV", at: 0 },
+  { label: "Mengunggah ke server", at: 1 },
+  { label: "Mengekstrak teks CV", at: 3 },
+  { label: "Menyimpan CV aktif", at: 8 },
+];
 
 function formatDate(value: string | null): string {
   if (!value) return "—";
@@ -89,6 +135,24 @@ function Card({
   );
 }
 
+type ScoreTone = { bar: string; text: string; label: string };
+
+function scoreTone(value: number | null): ScoreTone {
+  if (value == null) {
+    return { bar: "bg-muted/40", text: "text-muted", label: "Belum dinilai" };
+  }
+  if (value >= 75) {
+    return { bar: "bg-success", text: "text-success", label: "Tinggi" };
+  }
+  if (value >= 55) {
+    return { bar: "bg-primary", text: "text-primary", label: "Sedang" };
+  }
+  if (value >= 35) {
+    return { bar: "bg-warning", text: "text-warning", label: "Cukup rendah" };
+  }
+  return { bar: "bg-danger", text: "text-danger", label: "Rendah" };
+}
+
 function ScoreBar({
   label,
   value,
@@ -98,24 +162,80 @@ function ScoreBar({
   value: number | null;
   hint: string;
 }) {
+  const tone = scoreTone(value);
   return (
-    <div className="rounded-lg border border-border px-3 py-2.5">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[11px] uppercase tracking-wide text-muted">
-          {label}
-        </span>
-        <span className="text-lg font-semibold tabular-nums">
-          {value == null ? "—" : `${value}%`}
-        </span>
+    <div className="rounded-xl border border-border bg-background p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
+            {label}
+          </p>
+          <p className="mt-0.5 text-[11px] leading-snug text-muted">{hint}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p
+            className={`text-2xl font-semibold leading-none tabular-nums ${tone.text}`}
+          >
+            {value == null ? "—" : `${value}%`}
+          </p>
+          <p className={`mt-1 text-[10px] font-medium ${tone.text}`}>
+            {tone.label}
+          </p>
+        </div>
       </div>
-      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-muted">
+      <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-surface-muted">
         <div
-          className="h-full rounded-full bg-foreground transition-[width] duration-300"
+          className={`h-full rounded-full ${tone.bar} transition-[width] duration-500`}
           style={{ width: `${value ?? 0}%` }}
         />
       </div>
-      <p className="mt-1 text-[11px] text-muted">{hint}</p>
     </div>
+  );
+}
+
+function AnalysisBlock({
+  title,
+  icon,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-xl border border-border bg-background p-3.5">
+      <div className="flex items-center gap-2">
+        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-primary">
+          {icon}
+        </span>
+        <h3 className="text-[12px] font-semibold tracking-tight">{title}</h3>
+      </div>
+      <div className="mt-2.5 text-[13px]">{children}</div>
+    </div>
+  );
+}
+
+function TokenUsageNote({
+  usage,
+}: {
+  usage: NonNullable<JobApplication["token_usage"]>;
+}) {
+  return (
+    <p className="mt-2.5 rounded-lg border border-border bg-surface-muted/40 px-3 py-2 text-[11px] tabular-nums text-muted">
+      Token AI terakhir:{" "}
+      <span className="text-foreground">
+        {usage.prompt_tokens.toLocaleString("id-ID")}
+      </span>{" "}
+      prompt ·{" "}
+      <span className="text-foreground">
+        {usage.completion_tokens.toLocaleString("id-ID")}
+      </span>{" "}
+      output ·{" "}
+      <span className="font-medium text-foreground">
+        {usage.total_tokens.toLocaleString("id-ID")}
+      </span>{" "}
+      total
+    </p>
   );
 }
 
@@ -126,9 +246,38 @@ export function JobDetail({ jobId }: { jobId: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [usageNote, setUsageNote] = useState<{
+    action: "analyze" | "cover";
+    usage: NonNullable<JobApplication["token_usage"]>;
+  } | null>(null);
 
   const [busy, setBusy] = useState<"crawl" | "analyze" | "cover" | null>(null);
+  const [sources, setSources] = useState<JobProfileSource[]>([
+    "cv",
+    "portfolio",
+    "linkedin",
+  ]);
+
+  const sourceReady: Record<JobProfileSource, boolean> = {
+    cv: Boolean(cv?.filename),
+    portfolio: Boolean(cv?.portfolio_url || (cv?.portfolio_chars ?? 0) > 0),
+    linkedin: Boolean(cv?.linkedin_url || (cv?.linkedin_chars ?? 0) > 0),
+  };
+  const activeSources = sources.filter((source) => sourceReady[source]);
+
+  function toggleSource(source: JobProfileSource) {
+    setSources((prev) =>
+      prev.includes(source)
+        ? prev.filter((item) => item !== source)
+        : [...prev, source],
+    );
+  }
+
   const [urlInput, setUrlInput] = useState("");
+  const [hasLink, setHasLink] = useState(true);
+  const [descDraft, setDescDraft] = useState("");
+  const [editingDescription, setEditingDescription] = useState(false);
+  const editingDescriptionRef = useRef(false);
   const [coverText, setCoverText] = useState("");
   const [coverDirty, setCoverDirty] = useState(false);
   const coverDirtyRef = useRef(false);
@@ -163,9 +312,11 @@ export function JobDetail({ jobId }: { jobId: string }) {
     createdAt: "",
     appliedAt: "",
     notes: "",
+    jobDescription: "",
   });
 
   const [cvUploading, setCvUploading] = useState(false);
+  const [cvProgress, setCvProgress] = useState<number | null>(null);
   const [cvError, setCvError] = useState<string | null>(null);
   const cvInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -174,6 +325,9 @@ export function JobDetail({ jobId }: { jobId: string }) {
     // Keep unsaved edits when another action (status, crawl) refreshes the row.
     if (!coverDirtyRef.current) {
       setCoverText(next.cover_letter ?? "");
+    }
+    if (!editingDescriptionRef.current) {
+      setDescDraft(next.job_description ?? "");
     }
     // Do not clobber the edit form while the user is editing it.
     if (!editingRef.current) {
@@ -187,6 +341,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
         createdAt: toDateInput(next.created_at),
         appliedAt: toDateInput(next.applied_at),
         notes: next.notes,
+        jobDescription: next.job_description ?? "",
       });
     }
   }, []);
@@ -201,7 +356,12 @@ export function JobDetail({ jobId }: { jobId: string }) {
       ]);
       applyJob(row);
       setUrlInput(row.job_url ?? "");
-      setCv(cvRow && cvRow.filename ? cvRow : null);
+      setHasLink(Boolean(row.job_url));
+      setCv(
+        cvRow && (cvRow.filename || cvRow.linkedin_url || cvRow.portfolio_url)
+          ? cvRow
+          : null,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat lamaran.");
     } finally {
@@ -237,8 +397,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
     if (!urlInput.trim() && !job.job_url) {
       setError("Isi URL rekrutmen dulu.");
       return;
-    }
-    setBusy("crawl");
+    }    setBusy("crawl");
     setError(null);
     setNotice(null);
     try {
@@ -257,15 +416,51 @@ export function JobDetail({ jobId }: { jobId: string }) {
     }
   }
 
+  function toggleDescriptionEdit() {
+    setEditingDescription((value) => {
+      const next = !value;
+      editingDescriptionRef.current = next;
+      if (next) setDescDraft(job?.job_description ?? "");
+      return next;
+    });
+  }
+
+  async function saveDescription() {
+    if (!job) return;
+    const updated = await savePatch({ job_description: descDraft.trim() });
+    if (updated) {
+      editingDescriptionRef.current = false;
+      setEditingDescription(false);
+      setNotice("Deskripsi lowongan disimpan.");
+    }
+  }
+
   async function handleAnalyze() {
     if (!job || busy) return;
+    if (!job.job_description.trim()) {
+      setError(
+        hasLink
+          ? "Deskripsi lowongan masih kosong. Crawl link rekrutmen dulu, atau isi deskripsi lowongan secara manual, agar analisa tidak menebak dari judul."
+          : "Deskripsi lowongan masih kosong. Isi deskripsi lowongan secara manual dulu.",
+      );
+      return;
+    }
+    if (activeSources.length === 0) {
+      setError("Pilih minimal satu sumber analisa (CV, Portfolio, atau LinkedIn).");
+      return;
+    }
     setBusy("analyze");
     setError(null);
     setNotice(null);
     try {
-      const updated = await analyzeJob(job.id);
+      const updated = await analyzeJob(job.id, activeSources);
       applyJob(updated);
-      setNotice("Analisa selesai: kecocokan dan peluang keberhasilan diperbarui.");
+      if (updated.token_usage) {
+        setUsageNote({ action: "analyze", usage: updated.token_usage });
+      }
+      emitUsageChanged();
+      const used = activeSources.map((source) => SOURCE_LABEL[source]).join(", ");
+      setNotice(`Analisa selesai memakai ${used}. Skor dan rekomendasi diperbarui.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Analisa gagal.");
     } finally {
@@ -275,14 +470,33 @@ export function JobDetail({ jobId }: { jobId: string }) {
 
   async function handleCover() {
     if (!job || busy) return;
+    if (!job.job_description.trim()) {
+      setError(
+        hasLink
+          ? "Deskripsi lowongan masih kosong. Crawl link rekrutmen dulu, atau isi deskripsi lowongan secara manual, sebelum membuat surat lamaran."
+          : "Deskripsi lowongan masih kosong. Isi deskripsi lowongan secara manual dulu sebelum membuat surat lamaran.",
+      );
+      return;
+    }
+    if (activeSources.length === 0) {
+      setError(
+        "Pilih minimal satu sumber (CV, Portfolio, atau LinkedIn) sebelum membuat surat lamaran.",
+      );
+      return;
+    }
     setBusy("cover");
     setError(null);
     setNotice(null);
     try {
-      const updated = await generateCoverLetter(job.id);
+      const updated = await generateCoverLetter(job.id, activeSources);
       markCoverDirty(false);
       applyJob(updated);
-      setNotice("Cover letter dibuat. Silakan edit lalu simpan.");
+      if (updated.token_usage) {
+        setUsageNote({ action: "cover", usage: updated.token_usage });
+      }
+      emitUsageChanged();
+      const used = activeSources.map((source) => SOURCE_LABEL[source]).join(", ");
+      setNotice(`Surat lamaran dibuat memakai ${used}. Silakan edit lalu simpan.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal membuat cover letter.");
     } finally {
@@ -310,6 +524,24 @@ export function JobDetail({ jobId }: { jobId: string }) {
     }
   }
 
+  function downloadCover() {
+    if (!job || !coverText.trim()) return;
+    const safeName =
+      `${job.role}-${job.company}-surat-lamaran`
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "surat-lamaran";
+    const blob = new Blob([coverText], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${safeName}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  }
+
   useEffect(
     () => () => {
       if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
@@ -333,6 +565,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
         ? `${editDraft.appliedAt}T00:00:00Z`
         : null,
       notes: editDraft.notes,
+      job_description: editDraft.jobDescription,
     });
     if (updated) {
       closeEditing();
@@ -342,15 +575,17 @@ export function JobDetail({ jobId }: { jobId: string }) {
 
   async function handleCvUpload(file: File) {
     setCvUploading(true);
+    setCvProgress(0);
     setCvError(null);
     try {
-      const uploaded = await uploadJobCv(file);
+      const uploaded = await uploadJobCv(file, setCvProgress);
       setCv(uploaded);
       setNotice("CV tersimpan. Jalankan analisa untuk melihat kecocokan.");
     } catch (err) {
       setCvError(err instanceof Error ? err.message : "Upload CV gagal.");
     } finally {
       setCvUploading(false);
+      setCvProgress(null);
       if (cvInputRef.current) cvInputRef.current.value = "";
     }
   }
@@ -496,12 +731,12 @@ export function JobDetail({ jobId }: { jobId: string }) {
           <div className="space-y-4">
             {/* Score summary */}
             <Card
-              title="Ringkasan kecocokan"
+              title="Analisa AI"
               action={
                 <button
                   type="button"
                   onClick={() => void handleAnalyze()}
-                  disabled={busy !== null || !cv}
+                  disabled={busy !== null || activeSources.length === 0}
                   className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-2.5 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
                 >
                   {busy === "analyze" ? (
@@ -509,31 +744,120 @@ export function JobDetail({ jobId }: { jobId: string }) {
                   ) : (
                     <Sparkles size={13} aria-hidden />
                   )}
-                  {busy === "analyze" ? "Menganalisa..." : "Analisa CV"}
+                  {busy === "analyze"
+                    ? "Menganalisa..."
+                    : job.analyzed_at
+                      ? "Analisa ulang"
+                      : "Analisa"}
                 </button>
               }
             >
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="mb-3 rounded-xl border border-border bg-background p-3">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-muted">
+                    Sumber analisa
+                  </p>
+                  <span className="text-[10px] text-muted">
+                    Sumber yang siap dipakai otomatis terpilih
+                  </span>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {SOURCE_ORDER.map((source) => {
+                    const ready = sourceReady[source];
+                    const checked = sources.includes(source);
+                    return (
+                      <label
+                        key={source}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[12px] transition-colors duration-150 ${
+                          ready
+                            ? "cursor-pointer border-border text-foreground hover:bg-surface-muted"
+                            : "cursor-not-allowed border-border text-muted opacity-50"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={!ready}
+                          onChange={() => toggleSource(source)}
+                          className="accent-foreground"
+                        />
+                        {SOURCE_LABEL[source]}
+                        {!ready && (
+                          <span className="text-[10px] text-muted">belum ada</span>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="mt-2 text-[11px] leading-relaxed text-muted">
+                  Semakin lengkap sumber, semakin tajam analisa. Portfolio bisa
+                  ditarik otomatis; LinkedIn memakai ringkasan teks di panel
+                  Profil kandidat.
+                </p>
+              </div>
+
+              {busy === "analyze" && (
+                <OperationStatus
+                  active
+                  title="Menganalisa kecocokan lamaran"
+                  steps={ANALYZE_STEPS}
+                  note="Model AI menyusun skor, prediksi tanggung jawab, gap, dan saran. Biasanya 15-45 detik."
+                />
+              )}
+
+              <div className="grid gap-2.5 sm:grid-cols-2">
                 <ScoreBar
-                  label="Match CV"
+                  label="Skor kecocokan"
                   value={job.match_score}
-                  hint="Kecocokan CV dengan kualifikasi lowongan."
+                  hint="Keselarasan profil dengan kualifikasi dan tanggung jawab lowongan."
                 />
                 <ScoreBar
-                  label="Peluang berhasil"
+                  label="Estimasi peluang"
                   value={job.success_score}
-                  hint="Estimasi AI, bukan jaminan. Naikkan dengan melengkapi CV."
+                  hint="Perkiraan peluang dipanggil interview, bukan jaminan."
                 />
               </div>
-              {!cv && (
-                <p className="mt-2 text-[11px] text-muted">
-                  Unggah CV di panel kanan untuk mengaktifkan analisa.
+
+              {!job.job_description.trim() && (
+                <div className="mt-2.5 flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/5 px-3 py-2">
+                  <AlertTriangle
+                    size={14}
+                    className="mt-0.5 shrink-0 text-warning"
+                    aria-hidden
+                  />
+                  <p className="text-[11px] leading-relaxed text-foreground">
+                    Deskripsi lowongan masih kosong. Crawl link rekrutmen dulu
+                    agar analisa dan surat lamaran tidak sekadar menebak dari
+                    judul.
+                  </p>
+                </div>
+              )}
+
+              {activeSources.length === 0 && (
+                <p className="mt-2.5 rounded-lg border border-dashed border-border px-3 py-2 text-[11px] text-muted">
+                  Belum ada sumber yang siap. Unggah CV atau isi link profil di
+                  panel kanan untuk mengaktifkan analisa.
                 </p>
               )}
-              {job.analyzed_at && (
-                <p className="mt-2 text-[11px] text-muted">
-                  Terakhir dianalisa {formatDate(job.analyzed_at)}
-                </p>
+
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
+                <span>
+                  {job.analyzed_at
+                    ? `Terakhir dianalisa ${formatDate(job.analyzed_at)}`
+                    : "Belum pernah dianalisa."}
+                </span>
+                {activeSources.length > 0 && (
+                  <span>
+                    Sumber siap:{" "}
+                    {activeSources
+                      .map((source) => SOURCE_LABEL[source])
+                      .join(", ")}
+                  </span>
+                )}
+              </div>
+
+              {usageNote?.action === "analyze" && (
+                <TokenUsageNote usage={usageNote.usage} />
               )}
             </Card>
 
@@ -553,32 +877,58 @@ export function JobDetail({ jobId }: { jobId: string }) {
                 ) : null
               }
             >
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <label htmlFor="job-crawl-url" className="sr-only">
-                  URL rekrutmen
-                </label>
+              <label className="flex cursor-pointer items-center gap-2 text-[12px] text-foreground">
                 <input
-                  id="job-crawl-url"
-                  type="url"
-                  value={urlInput}
-                  onChange={(event) => setUrlInput(event.target.value)}
-                  placeholder="https://perusahaan.com/careers/..."
-                  className={`h-9 min-w-0 flex-1 ${inputClass}`}
+                  type="checkbox"
+                  checked={hasLink}
+                  onChange={(event) => setHasLink(event.target.checked)}
+                  className="h-4 w-4 rounded border-border accent-primary"
                 />
-                <button
-                  type="button"
-                  onClick={() => void handleCrawl()}
-                  disabled={busy !== null}
-                  className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
-                >
-                  {busy === "crawl" ? (
-                    <Loader2 size={13} className="animate-spin" aria-hidden />
-                  ) : (
-                    <Globe size={13} aria-hidden />
-                  )}
-                  {busy === "crawl" ? "Crawl..." : "Crawl lowongan"}
-                </button>
-              </div>
+                Lowongan ini punya link rekrutmen
+              </label>
+
+              {hasLink ? (
+                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                  <label htmlFor="job-crawl-url" className="sr-only">
+                    URL rekrutmen
+                  </label>
+                  <input
+                    id="job-crawl-url"
+                    type="url"
+                    value={urlInput}
+                    onChange={(event) => setUrlInput(event.target.value)}
+                    placeholder="https://perusahaan.com/careers/..."
+                    className={`h-9 min-w-0 flex-1 ${inputClass}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleCrawl()}
+                    disabled={busy !== null}
+                    className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
+                  >
+                    {busy === "crawl" ? (
+                      <Loader2 size={13} className="animate-spin" aria-hidden />
+                    ) : (
+                      <Globe size={13} aria-hidden />
+                    )}
+                    {busy === "crawl" ? "Crawl..." : "Crawl lowongan"}
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-2 rounded-lg border border-dashed border-border px-3 py-2 text-[11px] text-muted">
+                  Tanpa link, isi deskripsi lowongan secara manual agar analisa
+                  dan surat lamaran tetap akurat.
+                </p>
+              )}
+
+              {busy === "crawl" && (
+                <OperationStatus
+                  active
+                  title="Mengambil deskripsi lowongan"
+                  steps={CRAWL_STEPS}
+                  note="Firecrawl membaca halaman lalu hanya menyimpan konten utama. Biasanya 5-30 detik."
+                />
+              )}
 
               {job.job_title && (
                 <p className="mt-2 text-[11px] text-muted">
@@ -586,71 +936,139 @@ export function JobDetail({ jobId }: { jobId: string }) {
                 </p>
               )}
 
-              {job.job_description ? (
-                <div className="mt-2 max-h-72 overflow-y-auto rounded-lg border border-border bg-background p-3">
-                  <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/90">
-                    {job.job_description}
-                  </p>
+              {editingDescription ? (
+                <div className="mt-2">
+                  <label htmlFor="job-description" className="sr-only">
+                    Deskripsi lowongan
+                  </label>
+                  <textarea
+                    id="job-description"
+                    value={descDraft}
+                    onChange={(event) => setDescDraft(event.target.value)}
+                    rows={10}
+                    placeholder="Tempel deskripsi lowongan: tanggung jawab, kualifikasi, teknologi, dan kata kunci penting."
+                    className={`resize-y ${inputClass}`}
+                  />
+                  <div className="mt-2 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={toggleDescriptionEdit}
+                      className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted"
+                    >
+                      Batal
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void saveDescription()}
+                      disabled={busy !== null}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
+                    >
+                      <Save size={13} aria-hidden />
+                      Simpan deskripsi
+                    </button>
+                  </div>
+                </div>
+              ) : job.job_description ? (
+                <div className="mt-2">
+                  <div className="max-h-72 overflow-y-auto rounded-lg border border-border bg-background p-3">
+                    <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-foreground/90">
+                      {job.job_description}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleDescriptionEdit}
+                    className="mt-2 text-[11px] text-muted transition-colors duration-150 hover:text-foreground"
+                  >
+                    Ubah manual
+                  </button>
                 </div>
               ) : (
-                <p className="mt-2 rounded-lg border border-dashed border-border px-3 py-4 text-center text-[12px] text-muted">
-                  Belum ada deskripsi. Tempel URL rekrutmen lalu crawl, atau isi
-                  manual lewat tombol edit.
-                </p>
+                <div className="mt-2 rounded-lg border border-dashed border-border px-3 py-4 text-center">
+                  <p className="text-[12px] text-muted">
+                    Belum ada deskripsi lowongan. Crawl link rekrutmen, atau isi
+                    manual.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={toggleDescriptionEdit}
+                    className="mt-2 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted"
+                  >
+                    <Pencil size={13} aria-hidden />
+                    Isi manual
+                  </button>
+                </div>
               )}
             </Card>
 
             {/* Predicted jobdesk + analysis */}
-            <Card title="Prediksi jobdesk & analisa">
+            <Card title="Hasil analisa">
               {job.predicted_jobdesk || job.match_analysis || job.success_analysis ? (
-                <div className="space-y-3">
+                <div className="space-y-2.5">
                   {job.predicted_jobdesk && (
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-muted">
-                        Prediksi isi pekerjaan
-                      </p>
-                      <div className="mt-1 rounded-lg border border-border bg-background p-3">
-                        <Markdown content={job.predicted_jobdesk} />
-                      </div>
-                    </div>
+                    <AnalysisBlock
+                      title="Prediksi tanggung jawab"
+                      icon={<ListChecks size={14} aria-hidden />}
+                    >
+                      <Markdown content={job.predicted_jobdesk} />
+                    </AnalysisBlock>
                   )}
                   {job.match_analysis && (
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-muted">
-                        Analisa kecocokan
-                      </p>
-                      <div className="mt-1 rounded-lg border border-border bg-background p-3">
-                        <Markdown content={job.match_analysis} />
-                      </div>
-                    </div>
+                    <AnalysisBlock
+                      title="Analisis kecocokan"
+                      icon={<Target size={14} aria-hidden />}
+                    >
+                      <Markdown content={job.match_analysis} />
+                    </AnalysisBlock>
                   )}
                   {job.success_analysis && (
-                    <div>
-                      <p className="text-[11px] uppercase tracking-wide text-muted">
-                        Analisa peluang
-                      </p>
-                      <div className="mt-1 rounded-lg border border-border bg-background p-3">
-                        <Markdown content={job.success_analysis} />
-                      </div>
-                    </div>
+                    <AnalysisBlock
+                      title="Analisis peluang"
+                      icon={<TrendingUp size={14} aria-hidden />}
+                    >
+                      <Markdown content={job.success_analysis} />
+                    </AnalysisBlock>
                   )}
                 </div>
               ) : (
-                <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-[12px] text-muted">
-                  Jalankan <strong>Analisa CV</strong> untuk melihat prediksi
-                  jobdesk, kecocokan, dan peluang keberhasilan.
-                </p>
+                <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
+                  <span className="mx-auto inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-surface text-primary">
+                    <Sparkles size={18} aria-hidden />
+                  </span>
+                  <p className="mt-3 text-[13px] font-medium">
+                    Belum ada hasil analisa
+                  </p>
+                  <p className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-muted">
+                    Analisa AI menghasilkan skor kecocokan, prediksi tanggung
+                    jawab, gap, dan langkah konkret. Ikuti urutan ini untuk hasil
+                    terbaik.
+                  </p>
+                  <ol className="mx-auto mt-3 max-w-md space-y-1.5 text-left text-[11px] text-muted">
+                    <li>
+                      <span className="font-medium text-foreground">1.</span>{" "}
+                      Crawl link rekrutmen agar deskripsi lowongan lengkap.
+                    </li>
+                    <li>
+                      <span className="font-medium text-foreground">2.</span>{" "}
+                      Pastikan CV dan profil pendukung sudah siap.
+                    </li>
+                    <li>
+                      <span className="font-medium text-foreground">3.</span>{" "}
+                      Klik <strong>Analisa</strong> di ringkasan kecocokan.
+                    </li>
+                  </ol>
+                </div>
               )}
             </Card>
 
             {/* Cover letter */}
             <Card
-              title="Cover letter"
+              title="Surat lamaran"
               action={
                 <button
                   type="button"
                   onClick={() => void handleCover()}
-                  disabled={busy !== null}
+                  disabled={busy !== null || activeSources.length === 0}
                   className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
                 >
                   {busy === "cover" ? (
@@ -662,32 +1080,71 @@ export function JobDetail({ jobId }: { jobId: string }) {
                     ? "Menulis..."
                     : job.cover_letter
                       ? "Buat ulang"
-                      : "Generate"}
+                      : "Buat surat"}
                 </button>
               }
             >
+              <p className="mb-2.5 text-[11px] leading-relaxed text-muted">
+                Surat dibuat dari{" "}
+                {activeSources.length > 0
+                  ? activeSources.map((source) => SOURCE_LABEL[source]).join(", ")
+                  : "sumber yang dipilih"}{" "}
+                dan detail lowongan. Selalu tinjau sebelum dikirim.
+              </p>
+
+              {busy === "cover" && (
+                <OperationStatus
+                  active
+                  title="Menulis surat lamaran"
+                  steps={COVER_STEPS}
+                  note="Model menyusun 280-420 kata dari sumber terpilih. Biasanya 10-30 detik."
+                />
+              )}
+
               {coverText ? (
                 <>
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted">
+                    <span>
+                      Untuk {job.role} · {job.company}
+                    </span>
+                    {coverDirty && (
+                      <span className="text-warning">Perubahan belum disimpan</span>
+                    )}
+                  </div>
                   <textarea
                     value={coverText}
                     onChange={(event) => {
                       setCoverText(event.target.value);
                       markCoverDirty(true);
                     }}
-                    rows={12}
-                    className={`resize-y ${inputClass}`}
+                    rows={14}
+                    className={`resize-y bg-background ${inputClass}`}
                   />
                   <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-[11px] text-muted">
+                    <span className="text-[11px] tabular-nums text-muted">
                       {coverText.trim().split(/\s+/).filter(Boolean).length} kata
+                      {" · "}
+                      {coverText.length.toLocaleString("id-ID")} karakter
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={downloadCover}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12px] text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+                      >
+                        <Download size={13} aria-hidden />
+                        Unduh
+                      </button>
                       <button
                         type="button"
                         onClick={() => void copyCover()}
                         className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12px] text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
                       >
-                        {copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+                        {copied ? (
+                          <Check size={13} aria-hidden />
+                        ) : (
+                          <Copy size={13} aria-hidden />
+                        )}
                         {copied ? "Tersalin" : "Salin"}
                       </button>
                       <button
@@ -702,11 +1159,29 @@ export function JobDetail({ jobId }: { jobId: string }) {
                     </div>
                   </div>
                 </>
-              ) : (
-                <p className="rounded-lg border border-dashed border-border px-3 py-4 text-center text-[12px] text-muted">
-                  Belum ada cover letter. Klik <strong>Generate</strong> untuk
-                  membuatnya dari CV dan detail lowongan.
-                </p>
+              ) : busy === "cover" ? null : (
+                <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
+                  <span className="mx-auto inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-surface text-primary">
+                    <Wand2 size={18} aria-hidden />
+                  </span>
+                  <p className="mt-3 text-[13px] font-medium">
+                    Belum ada surat lamaran
+                  </p>
+                  <p className="mx-auto mt-1 max-w-md text-[12px] leading-relaxed text-muted">
+                    Buat surat siap kirim sepanjang 280-420 kata yang
+                    menghubungkan pengalaman nyata dengan kebutuhan lowongan.
+                  </p>
+                  {activeSources.length === 0 && (
+                    <p className="mx-auto mt-2 max-w-md text-[11px] text-warning">
+                      Pilih minimal satu sumber (CV, Portfolio, atau LinkedIn)
+                      agar surat bisa dibuat.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {usageNote?.action === "cover" && (
+                <TokenUsageNote usage={usageNote.usage} />
               )}
             </Card>
 
@@ -838,8 +1313,29 @@ export function JobDetail({ jobId }: { jobId: string }) {
                     </div>
                   </div>
                   <div>
+                    <label
+                      htmlFor="edit-description"
+                      className="block text-[11px] text-muted"
+                    >
+                      Deskripsi lowongan
+                    </label>
+                    <textarea
+                      id="edit-description"
+                      value={editDraft.jobDescription}
+                      onChange={(event) =>
+                        setEditDraft((prev) => ({
+                          ...prev,
+                          jobDescription: event.target.value,
+                        }))
+                      }
+                      rows={6}
+                      placeholder="Tanggung jawab, kualifikasi, teknologi, dan kata kunci penting."
+                      className={`mt-1 resize-y ${inputClass}`}
+                    />
+                  </div>
+                  <div>
                     <label htmlFor="edit-notes" className="block text-[11px] text-muted">
-                      Catatan
+                      Catatan (bukan deskripsi lowongan)
                     </label>
                     <textarea
                       id="edit-notes"
@@ -942,12 +1438,23 @@ export function JobDetail({ jobId }: { jobId: string }) {
                   </button>
                 )}
               </div>
+              {cvUploading && (
+                <OperationStatus
+                  active
+                  title="Mengunggah CV"
+                  steps={CV_UPLOAD_STEPS}
+                  progress={cvProgress}
+                  note="Bar menunjukkan transfer file. Ekstraksi teks PDF/TXT berjalan di server setelah unggahan selesai."
+                />
+              )}
               {cvError && (
                 <p role="alert" className="mt-2 text-[11px] text-danger">
                   {cvError}
                 </p>
               )}
             </Card>
+
+            <JobProfileLinks cv={cv} onSaved={setCv} />
 
             <Card title="Aksi cepat">
               <div className="space-y-2">
@@ -967,7 +1474,7 @@ export function JobDetail({ jobId }: { jobId: string }) {
                 <button
                   type="button"
                   onClick={() => void handleAnalyze()}
-                  disabled={busy !== null || !cv}
+                  disabled={busy !== null || activeSources.length === 0}
                   className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
                 >
                   {busy === "analyze" ? (
@@ -975,12 +1482,12 @@ export function JobDetail({ jobId }: { jobId: string }) {
                   ) : (
                     <Sparkles size={14} aria-hidden />
                   )}
-                  Analisa CV & peluang
+                  Analisa profil & peluang
                 </button>
                 <button
                   type="button"
                   onClick={() => void handleCover()}
-                  disabled={busy !== null}
+                  disabled={busy !== null || activeSources.length === 0}
                   className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
                 >
                   {busy === "cover" ? (
@@ -988,12 +1495,12 @@ export function JobDetail({ jobId }: { jobId: string }) {
                   ) : (
                     <Wand2 size={14} aria-hidden />
                   )}
-                  Generate cover letter
+                  Buat surat lamaran
                 </button>
               </div>
-              <p className="mt-2 text-[11px] text-muted">
-                Analisa dan cover letter memakai CV aktif. Perbarui CV bila
-                pengalamanmu berubah.
+              <p className="mt-2 text-[11px] leading-relaxed text-muted">
+                Analisa dan surat lamaran memakai sumber yang dipilih
+                (CV/Portfolio/LinkedIn).
               </p>
             </Card>
 

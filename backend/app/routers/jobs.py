@@ -17,18 +17,23 @@ from fastapi import (
 
 from app.config import Settings, get_settings
 from app.deps import CurrentUser, rate_limit, read_rate_limit
-from app.memory_service_provider import build_llm_provider
+from app.llm import LLMProviderError
 from app.schemas import (
+    JobAnalyzeRequest,
     JobApplicationCreate,
     JobApplicationOut,
     JobApplicationUpdate,
     JobCrawlRequest,
     JobCvOut,
+    JobProfileLinksUpdate,
     JobStatus,
+    TokenUsageOut,
 )
+from app.services.feature_persona import load_feature_persona
 from app.services.job_service import JobCoach
+from app.services.llm_router import resolve_active_llm
 from app.services.crawl_provider import crawl, resolve_user_provider
-from app.services.usage_service import record_usage
+from app.services.usage_service import normalize_usage, record_usage
 from app.services.web_crawler import CrawlError, normalize_url
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -68,6 +73,29 @@ def _to_out(row: dict[str, Any]) -> JobApplicationOut:
     )
 
 
+def _with_usage(
+    out: JobApplicationOut, usage: dict[str, Any] | None
+) -> JobApplicationOut:
+    normalized = normalize_usage(usage)
+    if normalized:
+        out.token_usage = TokenUsageOut(**normalized)
+    return out
+
+
+_EMPTY_DESCRIPTION = (
+    "Deskripsi lowongan masih kosong. Crawl link rekrutmen atau isi deskripsi "
+    "lowongan secara manual dulu, agar analisa dan surat lamaran tidak sekadar "
+    "menebak dari judul."
+)
+
+
+def _require_description(application: JobApplicationOut) -> None:
+    if not application.job_description.strip():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail=_EMPTY_DESCRIPTION
+        )
+
+
 async def _get_row(client: Any, user_id: str, job_id: str) -> dict[str, Any]:
     response = (
         await client.table("job_applications")
@@ -82,16 +110,36 @@ async def _get_row(client: Any, user_id: str, job_id: str) -> dict[str, Any]:
     return response.data
 
 
-async def _get_cv_text(client: Any, user_id: str) -> tuple[str, str]:
+async def _get_profile(client: Any, user_id: str) -> dict[str, Any]:
     response = (
         await client.table("job_cv")
-        .select("filename, content")
+        .select("*")
         .eq("user_id", user_id)
         .maybe_single()
         .execute()
     )
-    row = (response.data if response else None) or {}
-    return row.get("content") or "", row.get("filename") or ""
+    return (response.data if response else None) or {}
+
+
+def _cv_out(row: dict[str, Any]) -> JobCvOut:
+    return JobCvOut(
+        filename=row.get("filename") or "",
+        summary=row.get("summary") or "",
+        char_count=len(row.get("content") or ""),
+        linkedin_url=row.get("linkedin_url") or "",
+        portfolio_url=row.get("portfolio_url") or "",
+        portfolio_chars=len(row.get("portfolio_content") or ""),
+        linkedin_chars=len(row.get("linkedin_content") or ""),
+        links_updated_at=row.get("links_updated_at"),
+        updated_at=row.get("updated_at"),
+    )
+
+
+def _clean_url(value: str) -> str:
+    url = (value or "").strip()
+    if url and not url.lower().startswith(("http://", "https://")):
+        url = f"https://{url}"
+    return url[:1000]
 
 
 def _safe_filename(name: str | None) -> str:
@@ -126,8 +174,90 @@ def _extract_cv_text(filename: str, mime_type: str, data: bytes) -> str:
     return data.decode("utf-8", errors="replace").strip()
 
 
-def _coach(settings: Settings) -> JobCoach:
-    return JobCoach(build_llm_provider(), settings.default_chat_model)
+async def _coach(settings: Settings, user: CurrentUser) -> JobCoach:
+    llm, model = await resolve_active_llm(settings, user.client, user.id)
+    return JobCoach(
+        llm,
+        model,
+        tpm_limit=settings.model_tpm_limit,
+    )
+
+
+def _profile_sources(
+    profile: dict[str, Any], payload: JobAnalyzeRequest | None
+) -> dict[str, Any]:
+    """Resolve the chosen analysis sources and validate they contain data."""
+    requested = list(dict.fromkeys(payload.sources if payload else ["cv"]))
+    if not requested:
+        requested = ["cv"]
+    include_cv = "cv" in requested
+    include_portfolio = "portfolio" in requested
+    include_linkedin = "linkedin" in requested
+
+    cv_text = profile.get("content") or ""
+    portfolio_url = profile.get("portfolio_url") or ""
+    portfolio_text = profile.get("portfolio_content") or ""
+    linkedin_url = profile.get("linkedin_url") or ""
+    linkedin_text = profile.get("linkedin_content") or ""
+
+    if include_cv and not cv_text.strip():
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Unggah CV dulu di panel CV, atau pilih sumber lain.",
+        )
+    if include_portfolio and not (portfolio_url.strip() or portfolio_text.strip()):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Isi link portfolio dulu di panel Profil kandidat.",
+        )
+    if include_linkedin and not (linkedin_url.strip() or linkedin_text.strip()):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Isi link LinkedIn dulu di panel Profil kandidat.",
+        )
+
+    return {
+        "include_cv": include_cv,
+        "include_portfolio": include_portfolio,
+        "include_linkedin": include_linkedin,
+        "cv_text": cv_text,
+        "portfolio_url": portfolio_url,
+        "portfolio_text": portfolio_text,
+        "linkedin_url": linkedin_url,
+        "linkedin_text": linkedin_text,
+    }
+
+
+def _llm_http_error(exc: LLMProviderError, prefix: str) -> HTTPException:
+    """Translate provider failures into a clear HTTP error."""
+    raw = str(exc).lower()
+    tpm_hit = (
+        exc.status_code == 413
+        or "tokens per minute" in raw
+        or ("rate_limit_exceeded" in raw and "tokens" in raw)
+    )
+    if tpm_hit:
+        return HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "Batas token Groq per menit (TPM) terlampaui. Tunggu ±60 detik "
+                "lalu coba lagi, atau kurangi sumber analisa (CV/Portfolio/LinkedIn)."
+            ),
+            headers={"Retry-After": "60"},
+        )
+    if exc.status_code == 429:
+        wait = exc.retry_after
+        detail = "Batas token Groq per menit tercapai."
+        if wait:
+            detail += f" Coba lagi dalam {wait:.1f} detik."
+        detail += " Kurangi sumber analisa (CV/Portfolio/LinkedIn) bila sering terjadi."
+        headers = {"Retry-After": str(max(1, int(wait or 2)))} if wait else None
+        return HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS, detail=detail, headers=headers
+        )
+    return HTTPException(
+        status.HTTP_502_BAD_GATEWAY, detail=f"{prefix}: {exc}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -135,22 +265,85 @@ def _coach(settings: Settings) -> JobCoach:
 # ---------------------------------------------------------------------------
 @router.get("/cv", response_model=JobCvOut)
 async def get_cv(user: CurrentUser = Depends(read_rate_limit)) -> JobCvOut:
-    response = (
-        await user.client.table("job_cv")
-        .select("filename, content, summary, updated_at")
-        .eq("user_id", user.id)
-        .maybe_single()
+    profile = await _get_profile(user.client, user.id)
+    if not profile:
+        return JobCvOut()
+    return _cv_out(profile)
+
+
+@router.put("/cv/links", response_model=JobCvOut)
+async def update_profile_links(
+    payload: JobProfileLinksUpdate,
+    user: CurrentUser = Depends(rate_limit),
+) -> JobCvOut:
+    """Save the owner's LinkedIn + portfolio links (and optional text snapshots)."""
+    from datetime import datetime, timezone
+
+    record: dict[str, Any] = {
+        "user_id": user.id,
+        "linkedin_url": _clean_url(payload.linkedin_url),
+        "portfolio_url": _clean_url(payload.portfolio_url),
+        "links_updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if payload.portfolio_content is not None:
+        record["portfolio_content"] = payload.portfolio_content.strip()[:40000]
+    if payload.linkedin_content is not None:
+        record["linkedin_content"] = payload.linkedin_content.strip()[:40000]
+
+    await (
+        user.client.table("job_cv")
+        .upsert(record, on_conflict="user_id")
         .execute()
     )
-    row = (response.data if response else None) or {}
-    if not row:
-        return JobCvOut()
-    return JobCvOut(
-        filename=row.get("filename") or "",
-        summary=row.get("summary") or "",
-        char_count=len(row.get("content") or ""),
-        updated_at=row.get("updated_at"),
+    return _cv_out(await _get_profile(user.client, user.id))
+
+
+@router.post("/cv/portfolio/crawl", response_model=JobCvOut)
+async def crawl_portfolio(
+    user: CurrentUser = Depends(rate_limit),
+    settings: Settings = Depends(get_settings),
+) -> JobCvOut:
+    """Fetch the portfolio page and store its text for the analysis."""
+    profile = await _get_profile(user.client, user.id)
+    raw_url = (profile.get("portfolio_url") or "").strip()
+    if not raw_url:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Isi link portfolio dulu sebelum menarik konten.",
+        )
+    try:
+        normalized = normalize_url(raw_url)
+    except CrawlError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    provider = await resolve_user_provider(user.client, user.id, settings)
+    try:
+        outcome = await crawl(
+            normalized,
+            settings=settings,
+            client=user.client,
+            user_id=user.id,
+            provider=provider,
+        )
+    except CrawlError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    from datetime import datetime, timezone
+
+    await (
+        user.client.table("job_cv")
+        .update(
+            {
+                "portfolio_content": (outcome.page.text or "").strip()[:40000],
+                "links_updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        .eq("user_id", user.id)
+        .execute()
     )
+    result = _cv_out(await _get_profile(user.client, user.id))
+    result.summary = outcome.notice or ""
+    return result
 
 
 @router.post("/cv", response_model=JobCvOut, status_code=status.HTTP_201_CREATED)
@@ -193,11 +386,7 @@ async def upload_cv(
         .upsert(payload, on_conflict="user_id")
         .execute()
     )
-    return JobCvOut(
-        filename=filename,
-        summary="",
-        char_count=len(content),
-    )
+    return _cv_out(await _get_profile(user.client, user.id))
 
 
 @router.delete("/cv", status_code=status.HTTP_204_NO_CONTENT)
@@ -357,19 +546,31 @@ async def crawl_application(
 @router.post("/{job_id}/analyze", response_model=JobApplicationOut)
 async def analyze_application(
     job_id: str,
+    payload: JobAnalyzeRequest | None = None,
     user: CurrentUser = Depends(rate_limit),
 ) -> JobApplicationOut:
     row = await _get_row(user.client, user.id, job_id)
-    cv_text, _ = await _get_cv_text(user.client, user.id)
-    if not cv_text.strip():
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            detail="Unggah CV dulu di panel CV sebelum analisa.",
-        )
+    profile = await _get_profile(user.client, user.id)
+    sources = _profile_sources(profile, payload)
 
     application = _to_out(row)
+    _require_description(application)
+    persona = await load_feature_persona(user.client, "jobs:analyze", user_id=user.id)
     try:
-        result, usage = await _coach(get_settings()).analyze(application, cv_text)
+        result, usage = await (await _coach(get_settings(), user)).analyze(
+            application,
+            sources["cv_text"],
+            persona,
+            include_cv=sources["include_cv"],
+            portfolio_text=sources["portfolio_text"],
+            portfolio_url=sources["portfolio_url"],
+            include_portfolio=sources["include_portfolio"],
+            linkedin_text=sources["linkedin_text"],
+            linkedin_url=sources["linkedin_url"],
+            include_linkedin=sources["include_linkedin"],
+        )
+    except LLMProviderError as exc:
+        raise _llm_http_error(exc, "Analisa gagal") from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY, detail=f"Analisa gagal: {exc}"
@@ -395,19 +596,38 @@ async def analyze_application(
         usage,
         source="jobs",
     )
-    return _to_out(response.data[0])
+    return _with_usage(_to_out(response.data[0]), usage)
 
 
 @router.post("/{job_id}/cover-letter", response_model=JobApplicationOut)
 async def generate_cover_letter(
     job_id: str,
+    payload: JobAnalyzeRequest | None = None,
     user: CurrentUser = Depends(rate_limit),
 ) -> JobApplicationOut:
     row = await _get_row(user.client, user.id, job_id)
-    cv_text, _ = await _get_cv_text(user.client, user.id)
+    profile = await _get_profile(user.client, user.id)
+    sources = _profile_sources(profile, payload)
     application = _to_out(row)
+    _require_description(application)
+    persona = await load_feature_persona(
+        user.client, "jobs:cover_letter", user_id=user.id
+    )
     try:
-        text, usage = await _coach(get_settings()).cover_letter(application, cv_text)
+        text, usage = await (await _coach(get_settings(), user)).cover_letter(
+            application,
+            sources["cv_text"],
+            persona,
+            include_cv=sources["include_cv"],
+            portfolio_text=sources["portfolio_text"],
+            portfolio_url=sources["portfolio_url"],
+            include_portfolio=sources["include_portfolio"],
+            linkedin_text=sources["linkedin_text"],
+            linkedin_url=sources["linkedin_url"],
+            include_linkedin=sources["include_linkedin"],
+        )
+    except LLMProviderError as exc:
+        raise _llm_http_error(exc, "Gagal membuat cover letter") from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status.HTTP_502_BAD_GATEWAY, detail=f"Gagal membuat cover letter: {exc}"
@@ -427,4 +647,4 @@ async def generate_cover_letter(
         usage,
         source="jobs",
     )
-    return _to_out(response.data[0])
+    return _with_usage(_to_out(response.data[0]), usage)

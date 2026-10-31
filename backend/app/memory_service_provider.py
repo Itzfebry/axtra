@@ -13,6 +13,7 @@ from app.services.memory_curator import MemoryCurator
 from app.services.memory_service import MemoryService
 from app.services.code_indexer import CodeIndexer
 from app.services.project_analyzer import ProjectAnalyzer
+from app.services.vibe_service import VibeService
 from app.llm import LLMProvider, LLMProviderError
 
 
@@ -68,3 +69,23 @@ def build_project_analyzer() -> ProjectAnalyzer:
     """Raises LLMProviderError when no LLM key is configured."""
     settings = _settings()
     return ProjectAnalyzer(llm=build_llm_provider(), model=settings.default_chat_model)
+
+
+def build_vibe_service(client: AsyncClient, persona: str = "") -> VibeService:
+    """Vibe Coding workspace service using the configured LLM provider/model.
+
+    Reads (sessions, documents, tasks, verification) must keep working when no
+    LLM key is configured, so a missing provider is passed through as ``None``;
+    only generation endpoints raise ``LLMProviderError``.
+    """
+    settings = _settings()
+    try:
+        llm: LLMProvider | None = build_llm_provider()
+    except LLMProviderError:
+        llm = None
+    return VibeService(
+        client=client,
+        llm=llm,
+        model=settings.default_chat_model,
+        persona=persona,
+    )

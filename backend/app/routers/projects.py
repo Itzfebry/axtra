@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 from app.deps import CurrentUser, rate_limit, read_rate_limit
 from app.llm import LLMProviderError
@@ -31,6 +34,7 @@ from app.schemas import (
     RepoFileContentOut,
     RepoFileOut,
 )
+from app.services.feature_persona import load_feature_persona
 from app.services.health_scheduler import (
     cancel_health_refresh,
     is_health_refresh_pending,
@@ -42,6 +46,16 @@ from app.supabase_client import get_owner_client
 logger = logging.getLogger("axtra.projects")
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
+def _format_sse(event: str, data: str) -> str:
+    return f"event: {event}\ndata: {data}\n\n"
 
 
 def _service(user: CurrentUser) -> ProjectService:
@@ -84,6 +98,7 @@ async def create_project(
         description=payload.description,
         status_=payload.status,
         tech_stack=payload.tech_stack,
+        labels=payload.labels,
         repo_url=payload.repo_url,
         notes=payload.notes,
     )
@@ -236,8 +251,9 @@ async def ask_repo(
         ) from exc
     indexer = build_code_indexer(user.client)
     question = payload.question.strip()
+    persona = await load_feature_persona(user.client, "projects:ask", user_id=user.id)
     try:
-        result = await indexer.answer(str(project_id), question)
+        result = await indexer.answer(str(project_id), question, persona)
     except LLMProviderError as exc:
         detail = _llm_error_detail(exc)
         await _save_ask(
@@ -258,6 +274,71 @@ async def ask_repo(
         answer=result.answer,
         sources=result.sources,
         ask_id=saved.id if saved else None,
+    )
+
+
+@router.post("/{project_id}/repo/ask/stream")
+async def ask_repo_stream(
+    project_id: uuid.UUID,
+    payload: RepoAskRequest,
+    user: CurrentUser = Depends(rate_limit),
+):
+    """Stream a "Tanya proyek" answer as SSE.
+
+    Events: ``token`` ({t}), ``sources`` ({sources}), ``done`` ({ask_id}),
+    ``error`` ({detail}). The turn is persisted once the stream finishes.
+    """
+    service = _service(user)
+    try:
+        await service.get(user.id, str(project_id))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND, detail="Proyek tidak ditemukan."
+        ) from exc
+
+    indexer = build_code_indexer(user.client)
+    question = payload.question.strip()
+    persona = await load_feature_persona(user.client, "projects:ask", user_id=user.id)
+
+    async def generator() -> AsyncGenerator[str, None]:
+        parts: list[str] = []
+        sources: list[Any] = []
+        try:
+            async for kind, value in indexer.answer_stream(
+                str(project_id), question, persona
+            ):
+                if kind == "token":
+                    parts.append(value)
+                    yield _format_sse("token", json.dumps({"t": value}))
+                elif kind == "sources":
+                    sources = [
+                        source.model_dump() if hasattr(source, "model_dump") else source
+                        for source in value
+                    ]
+        except LLMProviderError as exc:
+            detail = _llm_error_detail(exc)
+            await _save_ask(
+                service, str(project_id), user.id, question=question, error=detail
+            )
+            yield _format_sse("error", json.dumps({"detail": detail}))
+            return
+        answer = "".join(parts).strip()
+        saved = await _save_ask(
+            service,
+            str(project_id),
+            user.id,
+            question=question,
+            answer=answer,
+            sources=sources,
+        )
+        yield _format_sse("sources", json.dumps({"sources": sources}))
+        yield _format_sse(
+            "done",
+            json.dumps({"ask_id": saved.id if saved else None, "answer": answer}),
+        )
+
+    return StreamingResponse(
+        generator(), media_type="text/event-stream", headers=_SSE_HEADERS
     )
 
 
@@ -352,22 +433,31 @@ async def analyze_project_health(
             detail="LLM belum dikonfigurasi. Setel GROQ_API_KEY.",
         ) from exc
     tasks = await service.list_tasks(str(project_id))
+    persona = await load_feature_persona(user.client, "projects:health", user_id=user.id)
     try:
         summary = await analyzer.analyze(
-            project, tasks, await service.list_documents(str(project_id))
+            project, tasks, await service.list_documents(str(project_id)), persona
         )
     except LLMProviderError as exc:
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, detail=_llm_error_detail(exc)
         ) from exc
     cancel_health_refresh(str(project_id))
+    generated_at = datetime.now(timezone.utc).isoformat()
+    # Keep a short history of analyses so the UI can show past snapshots.
+    history = [
+        item for item in (project.health_history or []) if isinstance(item, dict)
+    ]
+    history.append({"summary": summary, "generated_at": generated_at})
+    history = history[-10:]
     return await service.update(
         user.id,
         str(project_id),
         {
             "health_summary": summary,
-            "health_generated_at": datetime.now(timezone.utc).isoformat(),
+            "health_generated_at": generated_at,
             "health_stale": False,
+            "health_history": history,
         },
     )
 

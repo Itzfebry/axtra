@@ -8,7 +8,7 @@ export function ChatModePicker() {
       <div className="mx-auto w-full max-w-4xl px-4 py-8 pb-16">
         <header>
           <p className="text-[11px] uppercase tracking-wide text-muted">Chat</p>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">Pilih mode percakapan</h1>
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight font-brand">Pilih mode percakapan</h1>
           <p className="mt-1 max-w-xl text-[13px] text-muted">
             Setiap mode punya gaya, fitur, dan riwayat sendiri. Pengetahuan dan memori
             personal tetap dibagi di semua mode.

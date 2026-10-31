@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/AppShell";
 import { LoadingState } from "@/components/ui/LoadingState";
+import { TechChip } from "@/components/TechChip";
 import {
   createProject,
   deleteProject,
@@ -486,12 +487,7 @@ export default function ProjectsPage() {
                           {project.tech_stack.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-1.5">
                               {project.tech_stack.map((tech) => (
-                                <span
-                                  key={tech}
-                                  className="rounded-md bg-surface-muted px-2 py-0.5 text-[11px] text-muted"
-                                >
-                                  {tech}
-                                </span>
+                                <TechChip key={tech} name={tech} />
                               ))}
                             </div>
                           )}

@@ -28,6 +28,7 @@ class UsageWindow:
     minute_since: datetime
     day_since: datetime
     day_reset_at: datetime
+    by_model: dict[str, int] | None = None
 
 
 def _as_int(value: Any) -> int:
@@ -117,4 +118,28 @@ async def get_usage(client: AsyncClient, now: datetime | None = None) -> UsageWi
         row = response.data
     window.minute_tokens = _as_int(row.get("minute_tokens"))
     window.day_tokens = _as_int(row.get("day_tokens"))
+
+    # Per-model breakdown for the current day. Best-effort: older deployments
+    # without the RPC simply show no breakdown.
+    try:
+        by_model_response = await client.rpc(
+            "get_token_usage_by_model",
+            {"p_day_since": window.day_since.isoformat()},
+        ).execute()
+    except Exception:  # noqa: BLE001 - breakdown is optional telemetry
+        return window
+    breakdown: dict[str, int] = {}
+    rows = (
+        by_model_response.data
+        if isinstance(by_model_response.data, list)
+        else []
+    )
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        model = str(item.get("model") or "(tidak diketahui)")
+        tokens = _as_int(item.get("day_tokens"))
+        if tokens > 0:
+            breakdown[model] = breakdown.get(model, 0) + tokens
+    window.by_model = breakdown
     return window

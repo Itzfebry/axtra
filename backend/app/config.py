@@ -36,6 +36,44 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
     groq_chat_models: str = "openai/gpt-oss-120b,openai/gpt-oss-20b"
 
+    # Multi-provider LLM (OpenAI-compatible). Env keys are optional; a per-user
+    # key can be stored encrypted (provider_keys table) as an override. The
+    # active provider/model is stored per-user in profiles.preferences['llm'].
+    llm_provider: str = "groq"
+    llm_model: str = ""
+    openai_api_key: str = ""
+    openrouter_api_key: str = ""
+    together_api_key: str = ""
+    deepseek_api_key: str = ""
+    mistral_api_key: str = ""
+    gemini_api_key: str = ""
+    anthropic_api_key: str = ""
+    xai_api_key: str = ""
+    cerebras_api_key: str = ""
+    # Cloudflare Workers AI (OpenAI-compatible surface). The base URL embeds the
+    # account id, so it is built from ``cloudflare_account_id`` (or overridden by
+    # a full ``cloudflare_base_url``). Free tier: ~10,000 Neurons/day.
+    cloudflare_api_key: str = ""
+    cloudflare_account_id: str = ""
+    cloudflare_base_url: str = ""
+    # Cache window for live /models listings (short: metadata is provider-side).
+    provider_models_cache_seconds: int = 120
+    provider_ping_timeout: float = 12.0
+    # Image generation (OpenRouter-style Image API). The image provider/model
+    # live separately in profiles.preferences['llm_image']; these are defaults.
+    image_provider: str = "openrouter"
+    image_model: str = "google/gemini-3-pro-image"
+    image_timeout: float = 120.0
+    # Retry budget for transient image-provider failures (429/5xx).
+    image_max_retries: int = 2
+    # Hard daily cap on generated images (0 disables the cap). Guards against a
+    # runaway loop spending real credit.
+    image_daily_limit: int = 100
+    # Secret used to encrypt per-user provider keys at rest. Falls back to the
+    # session secret when unset so the feature still works in dev; set a stable
+    # value in production or stored keys become undecryptable after a change.
+    app_encryption_key: str = ""
+
     # Embeddings
     embedding_provider: str = "none"  # none | huggingface
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -80,6 +118,14 @@ class Settings(BaseSettings):
     research_max_sources: int = 5
     research_fetch_timeout: float = 15.0
     research_max_bytes: int = 2 * 1024 * 1024
+    # Firecrawl web search (Riset Web "Cari di web"): number of hits per query.
+    research_search_limit: int = 5
+
+    # AI skills: cap how much skill content is injected into one prompt so long
+    # Markdown skills cannot blow the model context window.
+    skill_max_chars: int = 6000
+    skills_max_total_chars: int = 12000
+    skills_max_per_feature: int = 6
 
     # Crawl provider: "httpx" (built-in parser, default) or "firecrawl" (opt-in).
     # Firecrawl is an external API; its key lives only here in the server env and

@@ -12,7 +12,7 @@ from typing import Any
 
 from supabase import AsyncClient
 
-from app.chat_modes import build_persona_prompt, resolve_command, resolve_mode_settings
+from app.chat_modes import resolve_command, resolve_mode_settings
 from app.config import Settings
 from app.llm import ChatMessage, ChatRequest, GroqProvider, LLMProvider
 from app.prompts import (
@@ -25,6 +25,7 @@ from app.prompts import (
     SYSTEM_PROMPT,
 )
 from app.schemas import MemoryOut
+from app.services.feature_persona import load_feature_persona
 from app.services.memory_extraction import MemoryExtractor
 from app.services.memory_service import MemoryService
 from app.services.project_service import ProjectService
@@ -94,6 +95,7 @@ class ConversationContext:
     mode: str
     profile: dict[str, Any] | None
     mode_settings: dict[str, Any]
+    persona: str
     history: list[dict[str, Any]]
     memories: list[MemoryOut]
     documents: list[dict[str, Any]]
@@ -248,11 +250,21 @@ class ChatService:
             except Exception:  # noqa: BLE001 - job context is best-effort
                 job_bundles = []
 
+        mode_settings = resolve_mode_settings(profile.get("preferences"), mode)
+        feature = f"chat:{mode}"
+        persona = await load_feature_persona(
+            client,
+            feature,
+            user_id=user_id,
+            preferences=profile.get("preferences"),
+        )
+
         return ConversationContext(
             conversation_id=conversation_id,
             mode=mode,
             profile=profile,
-            mode_settings=resolve_mode_settings(profile.get("preferences"), mode),
+            mode_settings=mode_settings,
+            persona=persona,
             history=history,
             memories=memories,
             documents=documents,
@@ -269,7 +281,7 @@ class ChatService:
             MODE_PROMPTS.get(context.mode, MODE_PROMPTS["general"]),
         ]
 
-        persona = build_persona_prompt(context.mode, context.mode_settings)
+        persona = context.persona
         if persona:
             parts.append(persona)
 
@@ -282,8 +294,12 @@ class ChatService:
         if profile.get("communication_style"):
             profile_bits.append(f"Gaya komunikasi pengguna: {profile['communication_style']}")
         preferences = profile.get("preferences") or {}
-        # `chat_modes` is internal configuration, not user context.
-        preferences = {k: v for k, v in preferences.items() if k != "chat_modes"}
+        # `chat_modes`/`feature_settings` are internal configuration, not user context.
+        preferences = {
+            k: v
+            for k, v in preferences.items()
+            if k not in ("chat_modes", "feature_settings")
+        }
         if preferences:
             import json as _json
 
@@ -705,8 +721,14 @@ class ChatService:
         project_service = ProjectService(client)
         target_project_id = project_ids[0] if project_ids else None
 
+        persona = ""
+        if mode:
+            persona = await load_feature_persona(
+                client, f"chat:{mode}", user_id=user_id
+            )
+
         extracted, usage, model = await self._extractor.extract(
-            user_message, recent_context[:2000]
+            user_message, recent_context[:2000], persona=persona
         )
         await record_usage(client, user_id, model, usage, source="memory")
 

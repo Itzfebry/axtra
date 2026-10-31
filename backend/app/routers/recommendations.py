@@ -14,6 +14,7 @@ from app.deps import CurrentUser, rate_limit
 from app.llm import ChatMessage, ChatRequest
 from app.memory_service_provider import build_llm_provider, build_memory_service
 from app.schemas import RecommendationOut
+from app.services.feature_persona import load_feature_persona
 
 router = APIRouter(prefix="/api/recommendations", tags=["recommendations"])
 
@@ -213,6 +214,9 @@ async def get_recommendations(
         )
 
     digest = _build_digest(profile, conversations, messages, memories)
+    persona = await load_feature_persona(
+        client, "recommendations", user_id=user.id
+    )
     fallback_greeting = (
         f"Halo{', ' + profile['display_name'] if profile.get('display_name') else ''}."
         " Ini yang bisa kita lanjutkan."
@@ -223,7 +227,10 @@ async def get_recommendations(
         content, _ = await llm.complete(
             ChatRequest(
                 messages=[
-                    ChatMessage(role="system", content=_SYSTEM_PROMPT),
+                    ChatMessage(
+                        role="system",
+                        content=_SYSTEM_PROMPT + (f"\n\n{persona}" if persona else ""),
+                    ),
                     ChatMessage(role="user", content=digest),
                 ],
                 model=settings.default_chat_model,

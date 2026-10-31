@@ -17,6 +17,7 @@ from app.schemas import (
     OrchestratorOut,
     OrchestratorRequest,
 )
+from app.services.feature_persona import load_feature_persona
 
 router = APIRouter(prefix="/api/orchestrator", tags=["orchestrator"])
 
@@ -258,6 +259,9 @@ async def orchestrate(
     memories = await _memory_context(user, request.message)
 
     system = _SYSTEM_PROMPT + "\n\n" + context
+    persona = await load_feature_persona(user.client, "orchestrator", user_id=user.id)
+    if persona:
+        system += "\n\n" + persona
     if memories:
         system += "\n\n" + memories
 

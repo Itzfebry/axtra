@@ -20,21 +20,26 @@ from app.routers import (
     chat_settings,
     conversations,
     documents,
+    feature_settings,
     health,
+    images,
     jobs,
     memories,
     orchestrator,
     profile,
     projects,
+    providers,
     recommendations,
     research,
+    skills,
     usage,
+    vibe,
 )
 
 logger = logging.getLogger("axtra")
 
 # SSE must not be compressed or buffered; everything else benefits from gzip.
-_NO_GZIP_PATHS = ("/api/chat",)
+_NO_GZIP_PATHS = ("/api/chat", "/api/images/generate/stream")
 
 
 class SelectiveGZipMiddleware:
@@ -100,15 +105,20 @@ def create_app() -> FastAPI:
     app.include_router(profile.router)
     app.include_router(chat.router)
     app.include_router(chat_settings.router)
+    app.include_router(feature_settings.router)
+    app.include_router(skills.router)
     app.include_router(conversations.router)
     app.include_router(documents.router)
     app.include_router(memories.router)
     app.include_router(projects.router)
+    app.include_router(vibe.router)
     app.include_router(jobs.router)
     app.include_router(research.router)
     app.include_router(recommendations.router)
     app.include_router(orchestrator.router)
     app.include_router(usage.router)
+    app.include_router(providers.router)
+    app.include_router(images.router)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):

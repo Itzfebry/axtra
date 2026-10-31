@@ -8,15 +8,21 @@ import {
   ExternalLink,
   FileCode2,
   GripVertical,
+  History,
   Link2,
   Maximize2,
   MessageSquare,
   MessagesSquare,
   Minimize2,
+  MoreVertical,
+  Pencil,
   Plus,
+  Search,
   Send,
+  Sparkles,
   StickyNote,
   Trash2,
+  WrapText,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -25,9 +31,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { AppShell } from "@/components/AppShell";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Markdown } from "@/components/Markdown";
+import { TechChip } from "@/components/TechChip";
+import { TechStackField } from "@/components/TechStackField";
 import {
   analyzeProjectHealth,
-  askProjectRepo,
   clearProjectAsks,
   clearProjectRepo,
   createProjectDocument,
@@ -44,6 +51,7 @@ import {
   listProjectFiles,
   listProjectTasks,
   reorderProjectTasks,
+  streamRepoAsk,
   updateProject,
   updateProjectDocument,
   updateProjectTask,
@@ -78,6 +86,21 @@ const TASK_COLUMNS: { status: ProjectTaskStatus; label: string }[] = [
   { status: "done", label: "Selesai" },
 ];
 
+// Task title colour follows its column. Todo reads as a red-bordered card with
+// white title; doing/selesai use matte tints.
+const TASK_TITLE_CLASSES: Record<ProjectTaskStatus, string> = {
+  todo: "text-foreground",
+  doing: "text-amber-400",
+  done: "text-emerald-400",
+};
+
+// Card border per column. Todo cards carry a red border.
+const TASK_CARD_CLASSES: Record<ProjectTaskStatus, string> = {
+  todo: "border-red-500/60 hover:border-red-500",
+  doing: "border-border hover:border-foreground/25",
+  done: "border-border hover:border-foreground/25",
+};
+
 const PRIORITY_LABELS: Record<ProjectTaskPriority, string> = {
   low: "Rendah",
   medium: "Sedang",
@@ -85,10 +108,80 @@ const PRIORITY_LABELS: Record<ProjectTaskPriority, string> = {
 };
 
 const PRIORITY_CLASSES: Record<ProjectTaskPriority, string> = {
-  low: "border-border text-muted",
-  medium: "border-sky-500/40 text-sky-500",
-  high: "border-amber-500/50 text-amber-500",
+  low: "border-emerald-700 bg-emerald-700 text-white",
+  medium: "border-amber-600 bg-amber-600 text-white",
+  high: "border-red-700 bg-red-700 text-white",
 };
+
+// Solid dot matching each priority badge, for the right-click menu.
+const PRIORITY_DOT: Record<ProjectTaskPriority, string> = {
+  low: "bg-emerald-600",
+  medium: "bg-amber-500",
+  high: "bg-red-600",
+};
+
+// Repo indexing pipeline, in order. Matched against the free-text stage the
+// backend streams so the stepper can highlight the current step.
+const REPO_INDEX_STEPS = [
+  "Menyiapkan",
+  "Ambil struktur",
+  "Unduh file",
+  "Chunk & embedding",
+  "Simpan index",
+  "Ringkasan",
+];
+
+/** Index of the active stepper step (== length when indexing is done). */
+function repoIndexStep(stage: string | null, status: string): number {
+  if (status === "ready") return REPO_INDEX_STEPS.length;
+  const text = (stage ?? "").toLowerCase();
+  if (text.includes("selesai")) return REPO_INDEX_STEPS.length;
+  if (text.includes("menyusun") || text.includes("ringkas")) return 5;
+  if (text.includes("menyimpan")) return 4;
+  if (
+    text.includes("embedding") ||
+    text.includes("memecah") ||
+    text.includes("chunk")
+  )
+    return 3;
+  if (text.includes("unduh")) return 2;
+  if (text.includes("struktur") || text.includes("metadata")) return 1;
+  return 0;
+}
+
+/** Animated integer that eases from its previous value to the next. */
+function CountUp({ value, duration = 450 }: { value: number; duration?: number }) {
+  const [display, setDisplay] = useState(value);
+  const fromRef = useRef(value);
+
+  useEffect(() => {
+    const reduce =
+      typeof window !== "undefined" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const from = fromRef.current;
+    if (reduce || from === value) {
+      fromRef.current = value;
+      setDisplay(value);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      setDisplay(Math.round(from + (value - from) * eased));
+      if (t < 1) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        fromRef.current = value;
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, duration]);
+
+  return <>{display}</>;
+}
 
 function formatWhen(value: string | null): string {
   if (!value) return "";
@@ -100,6 +193,18 @@ function formatWhen(value: string | null): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+/** Pull actionable bullet points out of a Markdown summary. */
+function parseBullets(markdown: string): string[] {
+  const out: string[] = [];
+  for (const raw of markdown.split("\n")) {
+    const match = raw.trim().match(/^(?:[-*+]|\d+[.)])\s+(.+)$/);
+    if (!match) continue;
+    const text = match[1].replace(/[*_`#]/g, "").trim();
+    if (text.length >= 4) out.push(text.slice(0, 200));
+  }
+  return out;
 }
 
 export default function ProjectDetailPage() {
@@ -116,6 +221,7 @@ export default function ProjectDetailPage() {
     description: "",
     status: "idea" as ProjectStatus,
     tech_stack: "",
+    labels: "",
     repo_url: "",
     notes: "",
   });
@@ -128,6 +234,7 @@ export default function ProjectDetailPage() {
   const [asksLoading, setAsksLoading] = useState(false);
   const [question, setQuestion] = useState("");
   const [pendingQuestion, setPendingQuestion] = useState<string | null>(null);
+  const [pendingAnswer, setPendingAnswer] = useState("");
   const [askError, setAskError] = useState<string | null>(null);
 
   // Project tasks.
@@ -142,6 +249,8 @@ export default function ProjectDetailPage() {
   // AI health analysis.
   const [healthBusy, setHealthBusy] = useState(false);
   const [healthError, setHealthError] = useState<string | null>(null);
+  const [healthTasksBusy, setHealthTasksBusy] = useState(false);
+  const [showHealthHistory, setShowHealthHistory] = useState(false);
 
   // Chat threads linked to this project via @mention.
   const [conversations, setConversations] = useState<ProjectConversation[]>([]);
@@ -160,7 +269,7 @@ export default function ProjectDetailPage() {
     content: string;
   }>({ title: "", kind: "note", url: "", content: "" });
 
-  // Focus mode: hide the detail column so "Tanya repo" gets the whole width.
+  // Focus mode: hide the detail column so "Tanya proyek" gets the whole width.
   const [chatFocused, setChatFocused] = useState(false);
 
   const [files, setFiles] = useState<RepoFile[]>([]);
@@ -168,6 +277,9 @@ export default function ProjectDetailPage() {
   const [filesLoading, setFilesLoading] = useState(false);
   const [openFile, setOpenFile] = useState<RepoFileContent | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
+  const [fileWrap, setFileWrap] = useState(false);
+  const [fileQuery, setFileQuery] = useState("");
+  const [highlightSnippet, setHighlightSnippet] = useState<string | null>(null);
 
   const askEndRef = useRef<HTMLDivElement | null>(null);
   const docFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -179,6 +291,7 @@ export default function ProjectDetailPage() {
       description: data.description,
       status: data.status,
       tech_stack: data.tech_stack.join(", "),
+      labels: data.labels.join(", "),
       repo_url: data.repo_url ?? "",
       notes: data.notes,
     });
@@ -321,6 +434,10 @@ export default function ProjectDetailPage() {
           .split(",")
           .map((item) => item.trim())
           .filter(Boolean),
+        labels: draft.labels
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
         repo_url: draft.repo_url.trim() || null,
         notes: draft.notes.trim(),
       });
@@ -379,16 +496,27 @@ export default function ProjectDetailPage() {
     setQuestion("");
     setAskError(null);
     setPendingQuestion(text);
+    setPendingAnswer("");
+    let failed = false;
     try {
-      await askProjectRepo(id, text);
+      for await (const evt of streamRepoAsk(id, text)) {
+        if (evt.event === "token") {
+          setPendingAnswer((prev) => prev + evt.data.t);
+        } else if (evt.event === "error") {
+          setAskError(evt.data.detail);
+          failed = true;
+        }
+      }
     } catch (err) {
       // Keep the typed question so the user can retry instead of retyping.
       setAskError(err instanceof Error ? err.message : "Gagal menjawab.");
-      setQuestion(text);
+      failed = true;
     } finally {
       // The backend persists both successful and failed turns.
+      if (failed) setQuestion(text);
       await loadAsks();
       setPendingQuestion(null);
+      setPendingAnswer("");
     }
   }
 
@@ -402,7 +530,7 @@ export default function ProjectDetailPage() {
   }
 
   async function clearAsks() {
-    if (!window.confirm("Hapus semua riwayat tanya repo ini?")) return;
+    if (!window.confirm("Hapus semua riwayat tanya proyek ini?")) return;
     try {
       await clearProjectAsks(id);
       setAsks([]);
@@ -432,25 +560,51 @@ export default function ProjectDetailPage() {
     }
   }
 
-  async function toggleTask(task: ProjectTask) {
-    const next = task.status === "done" ? "todo" : "done";
+  async function setTaskPriority(
+    task: ProjectTask,
+    priority: ProjectTaskPriority,
+  ) {
+    const previous = task.priority;
     setTaskBusy((prev) => ({ ...prev, [task.id]: true }));
     setTaskError(null);
     setTasks((prev) =>
-      prev.map((item) =>
-        item.id === task.id ? { ...item, status: next } : item,
-      ),
+      prev.map((item) => (item.id === task.id ? { ...item, priority } : item)),
     );
     try {
-      const updated = await updateProjectTask(id, task.id, { status: next });
+      const updated = await updateProjectTask(id, task.id, { priority });
       setTasks((prev) =>
         prev.map((item) => (item.id === updated.id ? updated : item)),
       );
     } catch (err) {
       setTasks((prev) =>
         prev.map((item) =>
-          item.id === task.id ? { ...item, status: task.status } : item,
+          item.id === task.id ? { ...item, priority: previous } : item,
         ),
+      );
+      setTaskError(err instanceof Error ? err.message : "Gagal mengubah prioritas.");
+    } finally {
+      setTaskBusy((prev) => ({ ...prev, [task.id]: false }));
+    }
+  }
+
+  async function updateTaskFields(
+    task: ProjectTask,
+    patch: { title?: string; detail?: string },
+  ) {
+    const previous = { title: task.title, detail: task.detail };
+    setTaskBusy((prev) => ({ ...prev, [task.id]: true }));
+    setTaskError(null);
+    setTasks((prev) =>
+      prev.map((item) => (item.id === task.id ? { ...item, ...patch } : item)),
+    );
+    try {
+      const updated = await updateProjectTask(id, task.id, patch);
+      setTasks((prev) =>
+        prev.map((item) => (item.id === updated.id ? updated : item)),
+      );
+    } catch (err) {
+      setTasks((prev) =>
+        prev.map((item) => (item.id === task.id ? { ...item, ...previous } : item)),
       );
       setTaskError(err instanceof Error ? err.message : "Gagal memperbarui tugas.");
     } finally {
@@ -468,6 +622,23 @@ export default function ProjectDetailPage() {
     } finally {
       setTaskBusy((prev) => ({ ...prev, [task.id]: false }));
     }
+  }
+
+  async function moveTaskToStatus(task: ProjectTask, status: ProjectTaskStatus) {
+    if (task.status === status) return;
+    const working = groupTasks(tasks);
+    working[task.status] = working[task.status].filter(
+      (item) => item.id !== task.id,
+    );
+    working[status] = [...working[status], { ...task, status }];
+    const items: { id: string; status: ProjectTaskStatus; position: number }[] =
+      [];
+    for (const key of Object.keys(working) as ProjectTaskStatus[]) {
+      working[key].forEach((item, position) => {
+        items.push({ id: item.id, status: key, position });
+      });
+    }
+    await reorderTasks(items);
   }
 
   async function reorderTasks(
@@ -507,6 +678,30 @@ export default function ProjectDetailPage() {
       );
     } finally {
       setHealthBusy(false);
+    }
+  }
+
+  async function addTasksFromHealth() {
+    const summary = project?.health_summary;
+    if (!summary) return;
+    const items = parseBullets(summary).slice(0, 12);
+    if (items.length === 0) {
+      setHealthError("Tidak ada poin daftar pada analisa untuk dijadikan tugas.");
+      return;
+    }
+    setHealthTasksBusy(true);
+    setHealthError(null);
+    try {
+      const created = await Promise.all(
+        items.map((title) => createProjectTask(id, { title, priority: "medium" })),
+      );
+      setTasks((prev) => [...prev, ...created]);
+    } catch (err) {
+      setHealthError(
+        err instanceof Error ? err.message : "Gagal menambah tugas dari analisa.",
+      );
+    } finally {
+      setHealthTasksBusy(false);
     }
   }
 
@@ -594,9 +789,11 @@ export default function ProjectDetailPage() {
     reader.readAsText(file);
   }
 
-  async function viewFile(path: string) {
+  async function viewFile(path: string, snippet?: string) {
     setFileLoading(true);
     setOpenFile(null);
+    setFileQuery("");
+    setHighlightSnippet(snippet?.trim() ? snippet : null);
     try {
       const content = await getProjectFile(id, path);
       setOpenFile(content);
@@ -661,15 +858,22 @@ export default function ProjectDetailPage() {
                         {project.description}
                       </p>
                     )}
+                    {project.labels.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {project.labels.map((label) => (
+                          <span
+                            key={label}
+                            className="rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] font-medium text-primary"
+                          >
+                            {label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {project.tech_stack.length > 0 && (
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {project.tech_stack.map((tech) => (
-                          <span
-                            key={tech}
-                            className="rounded-md bg-surface-muted px-2 py-0.5 text-[11px] text-muted"
-                          >
-                            {tech}
-                          </span>
+                          <TechChip key={tech} name={tech} />
                         ))}
                       </div>
                     )}
@@ -685,14 +889,23 @@ export default function ProjectDetailPage() {
                       </a>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setEditing((value) => !value)}
-                    className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 text-[13px] text-foreground transition-colors duration-150 hover:bg-surface-muted"
-                  >
-                    {editing ? <X size={14} aria-hidden /> : null}
-                    {editing ? "Tutup" : "Ubah"}
-                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEditing((value) => !value)}
+                      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg border border-border px-3 text-[13px] text-foreground transition-colors duration-150 hover:bg-surface-muted"
+                    >
+                      {editing ? <X size={14} aria-hidden /> : null}
+                      {editing ? "Tutup" : "Ubah"}
+                    </button>
+                    <Link
+                      href={`/projects/${id}/vibe`}
+                      className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-primary px-3 text-[13px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90"
+                    >
+                      <Sparkles size={14} aria-hidden />
+                      Vibe Coding
+                    </Link>
+                  </div>
                 </div>
 
                 {editing && (
@@ -732,17 +945,25 @@ export default function ProjectDetailPage() {
                       </div>
                       <div>
                         <label className={labelClass}>Tech stack (pisah koma)</label>
-                        <input
+                        <TechStackField
                           value={draft.tech_stack}
-                          onChange={(event) =>
-                            setDraft((prev) => ({
-                              ...prev,
-                              tech_stack: event.target.value,
-                            }))
+                          onChange={(next) =>
+                            setDraft((prev) => ({ ...prev, tech_stack: next }))
                           }
                           className={`mt-1 ${inputClass}`}
                         />
                       </div>
+                    </div>
+                    <div>
+                      <label className={labelClass}>Label proyek (pisah koma)</label>
+                      <input
+                        value={draft.labels}
+                        onChange={(event) =>
+                          setDraft((prev) => ({ ...prev, labels: event.target.value }))
+                        }
+                        placeholder="Landing page, CRUD"
+                        className={`mt-1 ${inputClass}`}
+                      />
                     </div>
                     <div>
                       <label className={labelClass}>URL repo (opsional)</label>
@@ -799,6 +1020,35 @@ export default function ProjectDetailPage() {
                   </p>
                 )}
 
+                <nav
+                  aria-label="Navigasi bagian"
+                  className="sticky top-0 z-20 flex flex-wrap gap-1 rounded-lg border border-border bg-surface px-1.5 py-1.5"
+                >
+                  {[
+                    { id: "health", label: "Kesehatan" },
+                    { id: "tasks", label: "Tugas" },
+                    { id: "documents", label: "Data" },
+                    { id: "chats", label: "Chat" },
+                    ...(project.repo_url
+                      ? [{ id: "repo", label: "Repo" }]
+                      : []),
+                    ...(repoReady ? [{ id: "files", label: "File" }] : []),
+                  ].map((anchor) => (
+                    <button
+                      key={anchor.id}
+                      type="button"
+                      onClick={() =>
+                        document
+                          .getElementById(anchor.id)
+                          ?.scrollIntoView({ behavior: "smooth", block: "start" })
+                      }
+                      className="rounded-md px-2 py-1 text-[12px] text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+                    >
+                      {anchor.label}
+                    </button>
+                  ))}
+                </nav>
+
                 {project.notes && !editing && (
                   <section>
                     <h2 className="text-[13px] font-semibold uppercase tracking-wide text-muted">
@@ -812,6 +1062,7 @@ export default function ProjectDetailPage() {
 
                 {/* ---------------------------------------------- AI health */}
                 <CollapsibleSection
+                  id="health"
                   title="Kesehatan proyek"
                   subtitle={
                     project.health_stale ? (
@@ -827,18 +1078,42 @@ export default function ProjectDetailPage() {
                     ) : null
                   }
                   actions={
-                    <button
-                      type="button"
-                      disabled={healthBusy}
-                      onClick={() => void regenerateHealth()}
-                      className="inline-flex h-8 items-center rounded-lg border border-border px-2.5 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
-                    >
-                      {healthBusy
-                        ? "Menganalisa..."
-                        : project.health_summary
-                          ? "Perbarui analisa"
-                          : "Analisa proyek"}
-                    </button>
+                    <>
+                      {project.health_summary && (
+                        <button
+                          type="button"
+                          disabled={healthTasksBusy}
+                          onClick={() => void addTasksFromHealth()}
+                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-border px-2.5 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
+                        >
+                          <Plus size={13} aria-hidden />
+                          {healthTasksBusy ? "Menambah..." : "Jadikan tugas"}
+                        </button>
+                      )}
+                      {(project.health_history?.length ?? 0) > 0 && (
+                        <button
+                          type="button"
+                          aria-expanded={showHealthHistory}
+                          onClick={() => setShowHealthHistory((value) => !value)}
+                          className="inline-flex h-8 items-center gap-1 rounded-lg border border-border px-2.5 text-[12px] text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+                        >
+                          <History size={13} aria-hidden />
+                          Riwayat ({project.health_history.length})
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={healthBusy}
+                        onClick={() => void regenerateHealth()}
+                        className="inline-flex h-8 items-center rounded-lg border border-border px-2.5 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
+                      >
+                        {healthBusy
+                          ? "Menganalisa..."
+                          : project.health_summary
+                            ? "Perbarui analisa"
+                            : "Analisa proyek"}
+                      </button>
+                    </>
                   }
                 >
                   {healthError && (
@@ -856,10 +1131,37 @@ export default function ProjectDetailPage() {
                       deskripsi, catatan, repo, dan tugas.
                     </p>
                   )}
+
+                  {showHealthHistory &&
+                    (project.health_history?.length ?? 0) > 0 && (
+                      <div className="mt-3 border-t border-border pt-3">
+                        <p className="mb-2 text-[11px] uppercase tracking-wide text-muted">
+                          Riwayat analisa
+                        </p>
+                        <ul className="space-y-1.5">
+                          {[...project.health_history]
+                            .reverse()
+                            .map((snapshot, index) => (
+                              <li
+                                key={`${snapshot.generated_at ?? index}-${index}`}
+                                className="flex items-start gap-2 rounded-lg border border-border px-2.5 py-1.5"
+                              >
+                                <span className="mt-0.5 shrink-0 text-[11px] text-muted">
+                                  {formatWhen(snapshot.generated_at) || "—"}
+                                </span>
+                                <span className="min-w-0 flex-1 line-clamp-2 whitespace-pre-wrap break-words text-[12px] text-muted">
+                                  {snapshot.summary.replace(/[#*_`>]/g, "").slice(0, 240)}
+                                </span>
+                              </li>
+                            ))}
+                        </ul>
+                      </div>
+                    )}
                 </CollapsibleSection>
 
                 {/* --------------------------------------------------- tasks */}
                 <CollapsibleSection
+                  id="tasks"
                   title="Tugas"
                   subtitle={
                     <span className="text-[11px] text-muted">
@@ -910,15 +1212,23 @@ export default function ProjectDetailPage() {
                       {tasks.length === 0 && (
                         <p className="mb-2 text-[12px] text-muted">
                           Belum ada tugas. Tambah lewat form di atas, lalu tarik
-                          kartu antar kolom Todo / Doing / Selesai.
+                          kartu antar kolom Todo / Doing / Selesai. Klik kanan
+                          kartu atau tombol ⋯ untuk ubah status, prioritas, edit,
+                          atau hapus.
                         </p>
                       )}
                       <TaskBoard
                         tasks={tasks}
                         busy={taskBusy}
-                        onToggle={(task) => void toggleTask(task)}
                         onDelete={(task) => void removeTask(task)}
                         onReorder={(items) => void reorderTasks(items)}
+                        onPriorityChange={(task, priority) =>
+                          void setTaskPriority(task, priority)
+                        }
+                        onStatusChange={(task, status) =>
+                          void moveTaskToStatus(task, status)
+                        }
+                        onEdit={(task, patch) => void updateTaskFields(task, patch)}
                       />
                     </div>
                   )}
@@ -926,6 +1236,7 @@ export default function ProjectDetailPage() {
 
                 {/* ---------------------------------------- non-repo data */}
                 <CollapsibleSection
+                  id="documents"
                   title="Data proyek (non-repo)"
                   subtitle={
                     <span className="text-[11px] text-muted">
@@ -1114,6 +1425,7 @@ export default function ProjectDetailPage() {
 
                 {/* ------------------------------------------ linked chats */}
                 <CollapsibleSection
+                  id="chats"
                   title="Chat terkait"
                   subtitle={
                     <span className="text-[11px] text-muted">
@@ -1160,6 +1472,7 @@ export default function ProjectDetailPage() {
                 {/* -------------------------------------------- repo analysis */}
                 {project.repo_url && (
                   <CollapsibleSection
+                    id="repo"
                     title="Analisa repo"
                     subtitle={
                       <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">
@@ -1172,7 +1485,7 @@ export default function ProjectDetailPage() {
                           type="button"
                           disabled={repoBusy || indexing}
                           onClick={() => void runIndex()}
-                          className="inline-flex h-8 items-center rounded-lg border border-border px-2.5 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
+                          className="inline-flex h-8 items-center rounded-lg border border-border bg-white px-2.5 text-[12px] text-black transition-colors duration-150 hover:bg-neutral-100 disabled:opacity-40"
                         >
                           {project.repo_index_status === "ready"
                             ? "Index ulang"
@@ -1196,14 +1509,79 @@ export default function ProjectDetailPage() {
                       <div>
                         <div className="flex items-center justify-between text-[11px] text-muted">
                           <span>{project.repo_index_stage ?? "mengindeks"}</span>
-                          <span>{project.repo_index_progress}%</span>
+                          <span className="tabular-nums">
+                            <CountUp value={project.repo_index_progress} />%
+                          </span>
                         </div>
-                        <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-surface-muted">
-                          <div
-                            className="h-full rounded-full bg-foreground transition-[width] duration-500"
-                            style={{ width: `${project.repo_index_progress}%` }}
-                          />
+                        <div className="relative mt-1 h-2 w-full overflow-hidden rounded-full border border-border bg-surface-muted">
+                          {project.repo_index_progress > 0 ? (
+                            <>
+                              <div
+                                className="h-full rounded-full bg-foreground transition-[width] duration-500 ease-out"
+                                style={{ width: `${project.repo_index_progress}%` }}
+                              />
+                              <div
+                                aria-hidden
+                                className="animate-scan pointer-events-none absolute inset-y-0 left-0 w-1/4 bg-foreground/30"
+                              />
+                            </>
+                          ) : (
+                            <div
+                              aria-hidden
+                              className="animate-nav-progress h-full w-1/4 rounded-full bg-foreground/60"
+                            />
+                          )}
                         </div>
+
+                        <ol className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                          {REPO_INDEX_STEPS.map((label, index) => {
+                            const step = repoIndexStep(
+                              project.repo_index_stage,
+                              project.repo_index_status,
+                            );
+                            const done = index < step;
+                            const active = index === step;
+                            return (
+                              <li
+                                key={label}
+                                className="flex items-center gap-1.5 text-[11px]"
+                              >
+                                <span
+                                  className={`inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border ${
+                                    done
+                                      ? "border-emerald-500/60 text-emerald-400"
+                                      : active
+                                        ? "border-primary text-primary"
+                                        : "border-border text-muted-3"
+                                  }`}
+                                >
+                                  {done ? (
+                                    <Check size={9} aria-hidden />
+                                  ) : (
+                                    <span
+                                      className={`h-1.5 w-1.5 rounded-full ${
+                                        active
+                                          ? "animate-step-pulse bg-primary"
+                                          : "bg-muted-3"
+                                      }`}
+                                    />
+                                  )}
+                                </span>
+                                <span
+                                  className={
+                                    done
+                                      ? "text-muted"
+                                      : active
+                                        ? "font-medium text-foreground"
+                                        : "text-muted-3"
+                                  }
+                                >
+                                  {label}
+                                </span>
+                              </li>
+                            );
+                          })}
+                        </ol>
                       </div>
                     )}
 
@@ -1237,6 +1615,7 @@ export default function ProjectDetailPage() {
                 {/* ------------------------------------------------ file tree */}
                 {repoReady && (
                   <CollapsibleSection
+                    id="files"
                     title="File ter-index"
                     subtitle={
                       <span className="text-[11px] text-muted">({files.length})</span>
@@ -1279,19 +1658,53 @@ export default function ProjectDetailPage() {
                             <LoadingState label="Memuat file..." variant="inline" className="p-3" />
                           ) : openFile ? (
                             <>
-                              <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
-                                <span className="truncate font-mono text-[11px] text-muted">
+                              <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5">
+                                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted">
                                   {openFile.path}
                                 </span>
                                 <span className="shrink-0 text-[11px] text-muted">
                                   {openFile.language}
                                 </span>
+                                <div className="relative">
+                                  <Search
+                                    size={12}
+                                    className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted"
+                                    aria-hidden
+                                  />
+                                  <input
+                                    value={fileQuery}
+                                    onChange={(event) => setFileQuery(event.target.value)}
+                                    placeholder="Cari di file..."
+                                    aria-label="Cari di file"
+                                    className="h-7 w-40 rounded-md border border-border bg-surface pl-6 pr-2 text-[11px] text-foreground outline-none placeholder:text-muted-3"
+                                  />
+                                </div>
+                                <button
+                                  type="button"
+                                  aria-pressed={fileWrap}
+                                  onClick={() => setFileWrap((value) => !value)}
+                                  title={fileWrap ? "Nonaktifkan wrap" : "Aktifkan wrap"}
+                                  aria-label="Ubah pembungkusan baris"
+                                  className={`inline-flex h-7 w-7 items-center justify-center rounded-md border transition-colors duration-150 ${
+                                    fileWrap
+                                      ? "border-primary/50 bg-surface-muted text-foreground"
+                                      : "border-border text-muted hover:bg-surface-muted hover:text-foreground"
+                                  }`}
+                                >
+                                  <WrapText size={13} aria-hidden />
+                                </button>
                               </div>
-                              <pre className="max-h-72 overflow-auto p-3">
-                                <code className="font-mono text-[12px] leading-relaxed">
-                                  {openFile.content}
-                                </code>
-                              </pre>
+                              {highlightSnippet && (
+                                <p className="border-b border-border px-3 py-1 text-[11px] text-muted">
+                                  Menyorot potongan dari sumber jawaban.
+                                </p>
+                              )}
+                              <FileViewer
+                                content={openFile.content}
+                                wrap={fileWrap}
+                                query={fileQuery}
+                                highlight={highlightSnippet}
+                              />
                             </>
                           ) : (
                             <p className="p-3 text-[12px] text-muted">
@@ -1324,11 +1737,13 @@ export default function ProjectDetailPage() {
                   <div className="-mx-3 -mt-3 mb-3 flex flex-wrap items-center gap-2 rounded-t-lg border-b border-border bg-surface-muted/70 px-3 py-2">
                     <MessageSquare size={14} className="shrink-0 text-primary" aria-hidden />
                     <h2 className="text-[13px] font-semibold uppercase tracking-wide text-foreground">
-                      Tanya repo
+                      Tanya proyek
                     </h2>
-                    <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-muted">
-                      {REPO_STATUS_LABELS[project.repo_index_status]}
-                    </span>
+                    {repoReady && (
+                      <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[11px] text-muted">
+                        {REPO_STATUS_LABELS[project.repo_index_status]}
+                      </span>
+                    )}
                     <div className="flex-1" />
                     <button
                       type="button"
@@ -1376,7 +1791,7 @@ export default function ProjectDetailPage() {
                       <p className="text-[12px] text-muted">
                         {repoReady
                           ? "Belum ada pertanyaan. Tanyakan struktur, alur, atau bagian kode tertentu."
-                          : "Index repo dulu supaya Axtra bisa menjawab berdasarkan kode."}
+                          : "Belum ada pertanyaan. Tanyakan apa saja tentang proyek ini — ide, tujuan, stack, catatan, dokumen, atau tugas."}
                       </p>
                     ) : (
                       asks.map((turn) => (
@@ -1415,7 +1830,7 @@ export default function ProjectDetailPage() {
                                       <button
                                         key={`${turn.id}-${source.path}-${sourceIndex}`}
                                         type="button"
-                                        onClick={() => void viewFile(source.path)}
+                                        onClick={() => void viewFile(source.path, source.snippet)}
                                         title={source.path}
                                         className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-surface-muted px-2 py-0.5 font-mono text-[11px] text-muted transition-colors duration-150 hover:border-primary/50 hover:text-foreground"
                                       >
@@ -1435,7 +1850,13 @@ export default function ProjectDetailPage() {
                     {pendingQuestion && (
                       <div className="space-y-1.5">
                         <p className="text-[13px] font-medium">{pendingQuestion}</p>
-                        <p className="text-[12px] text-muted">Berpikir...</p>
+                        {pendingAnswer ? (
+                          <div className="rounded-lg border border-border px-3 py-2">
+                            <Markdown content={pendingAnswer} />
+                          </div>
+                        ) : (
+                          <p className="text-[12px] text-muted">Berpikir...</p>
+                        )}
                       </div>
                     )}
 
@@ -1453,14 +1874,16 @@ export default function ProjectDetailPage() {
                       value={question}
                       onChange={(event) => setQuestion(event.target.value)}
                       placeholder={
-                        repoReady ? "Tanya soal kode repo ini..." : "Index repo dulu..."
+                        repoReady
+                          ? "Tanya soal kode repo atau proyek ini..."
+                          : "Tanya apa saja tentang proyek ini..."
                       }
-                      disabled={!repoReady || Boolean(pendingQuestion)}
+                      disabled={Boolean(pendingQuestion)}
                       className={`flex-1 ${inputClass} disabled:opacity-50`}
                     />
                     <button
                       type="submit"
-                      disabled={!repoReady || Boolean(pendingQuestion) || !question.trim()}
+                      disabled={Boolean(pendingQuestion) || !question.trim()}
                       aria-label="Kirim pertanyaan"
                       className="inline-flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
                     >
@@ -1501,48 +1924,39 @@ function groupTasks(
 function TaskCard({
   task,
   busy,
-  onToggle,
-  onDelete,
-  onStatusChange,
+  menuOpen,
+  onOpenMenu,
+  onContextMenu,
 }: {
   task: ProjectTask;
   busy: boolean;
-  onToggle: () => void;
-  onDelete: () => void;
-  onStatusChange: (status: ProjectTaskStatus) => void;
+  menuOpen: boolean;
+  onOpenMenu: (target: HTMLElement) => void;
+  onContextMenu: (event: React.MouseEvent) => void;
 }) {
   const done = task.status === "done";
   return (
-    <div className="group flex items-start gap-2 rounded-lg border border-border bg-surface px-2 py-1.5 transition-colors duration-150 hover:border-foreground/25">
+    <div
+      onContextMenu={onContextMenu}
+      className={`group flex items-start gap-2 rounded-lg border bg-surface px-2 py-1.5 transition-colors duration-150 ${TASK_CARD_CLASSES[task.status]}`}
+    >
       <span
         className="mt-0.5 shrink-0 cursor-grab text-muted active:cursor-grabbing"
         aria-hidden
       >
         <GripVertical size={13} />
       </span>
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={busy}
-        aria-label={done ? "Tandai belum selesai" : "Tandai selesai"}
-        className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors duration-150 disabled:opacity-40 ${
-          done
-            ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-500"
-            : "border-border text-transparent hover:border-foreground/40"
-        }`}
-      >
-        <Check size={13} aria-hidden />
-      </button>
       <div className="min-w-0 flex-1">
         <p
-          className={`text-[13px] leading-snug ${
-            done ? "text-muted line-through" : "text-foreground"
-          }`}
+          className={`flex items-start gap-1 text-[13px] leading-snug ${TASK_TITLE_CLASSES[task.status]}`}
         >
-          {task.title}
+          {done && (
+            <Check size={13} aria-hidden className="mt-0.5 shrink-0 text-emerald-400" />
+          )}
+          <span className="min-w-0">{task.title}</span>
         </p>
-        {task.detail && !done && (
-          <p className="mt-0.5 whitespace-pre-wrap text-[11px] text-muted">
+        {task.detail && (
+          <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words text-[11px] text-muted">
             {task.detail}
           </p>
         )}
@@ -1552,31 +1966,19 @@ function TaskCard({
           >
             {PRIORITY_LABELS[task.priority]}
           </span>
-          <select
-            value={task.status}
-            disabled={busy}
-            onChange={(event) =>
-              onStatusChange(event.target.value as ProjectTaskStatus)
-            }
-            aria-label="Ubah status tugas"
-            className="rounded border border-border bg-surface px-1 py-0.5 text-[11px] text-muted outline-none disabled:opacity-40"
-          >
-            {TASK_COLUMNS.map(({ status, label }) => (
-              <option key={status} value={status}>
-                {label}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
       <button
         type="button"
-        onClick={onDelete}
+        onClick={(event) => onOpenMenu(event.currentTarget)}
         disabled={busy}
-        aria-label="Hapus tugas"
-        className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted opacity-0 transition-opacity duration-150 hover:bg-surface-muted hover:text-danger focus:opacity-100 group-hover:opacity-100 disabled:opacity-40"
+        aria-haspopup="menu"
+        aria-expanded={menuOpen}
+        aria-label={`Menu tugas: ${task.title}`}
+        title="Menu tugas (ubah status, prioritas, edit, hapus)"
+        className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground focus:opacity-100 disabled:opacity-40"
       >
-        <Trash2 size={12} aria-hidden />
+        <MoreVertical size={14} aria-hidden />
       </button>
     </div>
   );
@@ -1585,17 +1987,21 @@ function TaskCard({
 function TaskBoard({
   tasks,
   busy,
-  onToggle,
   onDelete,
   onReorder,
+  onPriorityChange,
+  onStatusChange,
+  onEdit,
 }: {
   tasks: ProjectTask[];
   busy: Record<string, boolean>;
-  onToggle: (task: ProjectTask) => void;
   onDelete: (task: ProjectTask) => void;
   onReorder: (
     items: { id: string; status: ProjectTaskStatus; position: number }[],
   ) => void;
+  onPriorityChange: (task: ProjectTask, priority: ProjectTaskPriority) => void;
+  onStatusChange: (task: ProjectTask, status: ProjectTaskStatus) => void;
+  onEdit: (task: ProjectTask, patch: { title: string; detail: string }) => void;
 }) {
   const groups = useMemo(() => groupTasks(tasks), [tasks]);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -1603,6 +2009,54 @@ function TaskBoard({
     status: ProjectTaskStatus;
     beforeId: string | null;
   } | null>(null);
+  // One context menu for the whole board (right-click or the ⋯ button).
+  const [menu, setMenu] = useState<{
+    taskId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const menuTask = menu ? tasks.find((task) => task.id === menu.taskId) ?? null : null;
+  // Inline editor state for the "Edit" menu action.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDetail, setEditDetail] = useState("");
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("click", close);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  function openMenuAt(task: ProjectTask, x: number, y: number) {
+    setMenu({ taskId: task.id, x, y });
+  }
+
+  function startEditing(task: ProjectTask) {
+    setEditingId(task.id);
+    setEditTitle(task.title);
+    setEditDetail(task.detail);
+    setMenu(null);
+  }
+
+  function submitEdit(event: React.FormEvent, task: ProjectTask) {
+    event.preventDefault();
+    const title = editTitle.trim();
+    if (!title) return;
+    onEdit(task, { title, detail: editDetail.trim() });
+    setEditingId(null);
+  }
 
   function handleDrop(status: ProjectTaskStatus, beforeId: string | null) {
     setOver(null);
@@ -1636,114 +2090,236 @@ function TaskBoard({
     onReorder(items);
   }
 
-  function moveToStatus(task: ProjectTask, status: ProjectTaskStatus) {
-    if (task.status === status) return;
-    const working = groupTasks(tasks);
-    working[task.status] = working[task.status].filter(
-      (item) => item.id !== task.id,
-    );
-    working[status] = [...working[status], { ...task, status }];
-    const items: { id: string; status: ProjectTaskStatus; position: number }[] =
-      [];
-    for (const key of Object.keys(working) as ProjectTaskStatus[]) {
-      working[key].forEach((entry, position) => {
-        items.push({ id: entry.id, status: key, position });
-      });
-    }
-    onReorder(items);
-  }
-
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      {TASK_COLUMNS.map(({ status, label }) => {
-        const columnTasks = groups[status];
-        const columnActive = over?.status === status && over.beforeId === null;
-        return (
-          <div
-            key={status}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setOver((prev) =>
-                prev?.status === status && prev.beforeId === null
-                  ? prev
-                  : { status, beforeId: null },
-              );
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              handleDrop(status, null);
-            }}
-            className={`flex min-h-[140px] flex-col rounded-lg border p-2 transition-colors duration-150 ${
-              columnActive ? "border-primary/60 bg-surface-muted/60" : "border-border"
-            }`}
-          >
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                {label}
-              </span>
-              <span className="text-[11px] text-muted">{columnTasks.length}</span>
+    <>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {TASK_COLUMNS.map(({ status, label }) => {
+          const columnTasks = groups[status];
+          const columnActive = over?.status === status && over.beforeId === null;
+          return (
+            <div
+              key={status}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setOver((prev) =>
+                  prev?.status === status && prev.beforeId === null
+                    ? prev
+                    : { status, beforeId: null },
+                );
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                handleDrop(status, null);
+              }}
+              className={`flex min-h-[140px] flex-col rounded-lg border p-2 transition-colors duration-150 ${
+                columnActive ? "border-primary/60 bg-surface-muted/60" : "border-border"
+              }`}
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                  {label}
+                </span>
+                <span className="text-[11px] text-muted">{columnTasks.length}</span>
+              </div>
+
+              <ul className="flex-1 space-y-1.5">
+                {columnTasks.map((task) =>
+                  editingId === task.id ? (
+                    <li key={task.id}>
+                      <form
+                        onSubmit={(event) => submitEdit(event, task)}
+                        className="space-y-1.5 rounded-lg border border-primary/50 bg-surface p-2"
+                      >
+                        <input
+                          value={editTitle}
+                          onChange={(event) => setEditTitle(event.target.value)}
+                          autoFocus
+                          aria-label="Judul tugas"
+                          className={PROJECT_INPUT_CLASS}
+                        />
+                        <textarea
+                          value={editDetail}
+                          onChange={(event) => setEditDetail(event.target.value)}
+                          rows={3}
+                          placeholder="Detail / catatan tugas..."
+                          aria-label="Detail tugas"
+                          className={PROJECT_INPUT_CLASS}
+                        />
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="submit"
+                            disabled={!editTitle.trim()}
+                            className="inline-flex h-7 items-center rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+                          >
+                            Simpan
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingId(null)}
+                            className="inline-flex h-7 items-center rounded-md px-2.5 text-[11px] text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+                          >
+                            Batal
+                          </button>
+                        </div>
+                      </form>
+                    </li>
+                  ) : (
+                    <li
+                      key={task.id}
+                      draggable
+                      onDragStart={(event) => {
+                        setDragId(task.id);
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", task.id);
+                      }}
+                      onDragEnd={() => {
+                        setDragId(null);
+                        setOver(null);
+                      }}
+                      onDragOver={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        setOver((prev) =>
+                          prev?.status === status && prev.beforeId === task.id
+                            ? prev
+                            : { status, beforeId: task.id },
+                        );
+                      }}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        handleDrop(status, task.id);
+                      }}
+                      className={dragId === task.id ? "opacity-40" : ""}
+                    >
+                      <TaskCard
+                        task={task}
+                        busy={Boolean(busy[task.id])}
+                        menuOpen={menu?.taskId === task.id}
+                        onOpenMenu={(target) => {
+                          const rect = target.getBoundingClientRect();
+                          openMenuAt(task, rect.left, rect.bottom + 4);
+                        }}
+                        onContextMenu={(event) => {
+                          event.preventDefault();
+                          openMenuAt(task, event.clientX, event.clientY);
+                        }}
+                      />
+                    </li>
+                  ),
+                )}
+              </ul>
+
+              {columnTasks.length === 0 && (
+                <p className="px-1 py-4 text-center text-[11px] text-muted">
+                  {columnActive ? "Lepaskan di sini" : "Kosong — tarik ke sini"}
+                </p>
+              )}
             </div>
+          );
+        })}
+      </div>
 
-            <ul className="flex-1 space-y-1.5">
-              {columnTasks.map((task) => (
-                <li
-                  key={task.id}
-                  draggable
-                  onDragStart={(event) => {
-                    setDragId(task.id);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", task.id);
+      {menuTask && menu && (
+        <ul
+          role="menu"
+          style={{ top: menu.y, left: menu.x }}
+          onClick={(event) => event.stopPropagation()}
+          className="fixed z-50 min-w-[170px] overflow-hidden rounded-lg border border-border bg-surface py-1 text-[12px] shadow-lg"
+        >
+          <li className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-3">
+            Pindah ke
+          </li>
+          {TASK_COLUMNS.map((column) => {
+            const active = menuTask.status === column.status;
+            return (
+              <li key={column.status}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onStatusChange(menuTask, column.status);
+                    setMenu(null);
                   }}
-                  onDragEnd={() => {
-                    setDragId(null);
-                    setOver(null);
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    setOver((prev) =>
-                      prev?.status === status && prev.beforeId === task.id
-                        ? prev
-                        : { status, beforeId: task.id },
-                    );
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    handleDrop(status, task.id);
-                  }}
-                  className={dragId === task.id ? "opacity-40" : ""}
+                  disabled={Boolean(busy[menuTask.id]) || active}
+                  className={`flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left transition-colors duration-150 hover:bg-surface-muted disabled:cursor-default ${
+                    active ? "text-foreground" : "text-muted"
+                  }`}
                 >
-                  <TaskCard
-                    task={task}
-                    busy={Boolean(busy[task.id])}
-                    onToggle={() => onToggle(task)}
-                    onDelete={() => onDelete(task)}
-                    onStatusChange={(status) => moveToStatus(task, status)}
-                  />
-                </li>
-              ))}
-            </ul>
+                  <span>{column.label}</span>
+                  {active && <Check size={13} aria-hidden />}
+                </button>
+              </li>
+            );
+          })}
 
-            {columnTasks.length === 0 && (
-              <p className="px-1 py-4 text-center text-[11px] text-muted">
-                {columnActive ? "Lepaskan di sini" : "Kosong — tarik ke sini"}
-              </p>
-            )}
-          </div>
-        );
-      })}
-    </div>
+          <li className="my-1 border-t border-border" />
+
+          <li className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-3">
+            Prioritas
+          </li>
+          {PRIORITIES.map((priority) => {
+            const active = menuTask.priority === priority;
+            return (
+              <li key={priority}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onPriorityChange(menuTask, priority);
+                    setMenu(null);
+                  }}
+                  disabled={Boolean(busy[menuTask.id]) || active}
+                  className={`flex w-full items-center justify-between gap-3 px-3 py-1.5 text-left transition-colors duration-150 hover:bg-surface-muted disabled:cursor-default ${
+                    active ? "text-foreground" : "text-muted"
+                  }`}
+                >
+                  <span>{PRIORITY_LABELS[priority]}</span>
+                  <span className={`h-2.5 w-2.5 rounded-full ${PRIORITY_DOT[priority]}`} />
+                </button>
+              </li>
+            );
+          })}
+
+          <li className="my-1 border-t border-border" />
+
+          <li>
+            <button
+              type="button"
+              onClick={() => startEditing(menuTask)}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+            >
+              <Pencil size={12} aria-hidden />
+              Edit tugas
+            </button>
+          </li>
+          <li>
+            <button
+              type="button"
+              onClick={() => {
+                onDelete(menuTask);
+                setMenu(null);
+              }}
+              disabled={Boolean(busy[menuTask.id])}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-danger disabled:opacity-40"
+            >
+              <Trash2 size={12} aria-hidden />
+              Hapus tugas
+            </button>
+          </li>
+        </ul>
+      )}
+    </>
   );
 }
 
 function CollapsibleSection({
+  id,
   title,
   subtitle,
   actions,
   defaultOpen = true,
   children,
 }: {
+  id?: string;
   title: string;
   subtitle?: ReactNode;
   actions?: ReactNode;
@@ -1752,13 +2328,16 @@ function CollapsibleSection({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className="rounded-lg border border-border bg-surface p-3">
+    <section
+      id={id}
+      className="scroll-mt-24 rounded-lg border border-border bg-surface p-3"
+    >
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
           aria-expanded={open}
-          className="inline-flex items-center gap-1.5 text-[13px] font-semibold uppercase tracking-wide text-muted transition-colors duration-150 hover:text-foreground"
+          className="font-brand inline-flex items-center gap-1.5 text-[15px] font-semibold uppercase tracking-wide text-muted transition-colors duration-150 hover:text-foreground"
         >
           {open ? (
             <ChevronUp size={14} aria-hidden />
@@ -1773,5 +2352,78 @@ function CollapsibleSection({
       </div>
       {open && <div className="mt-3">{children}</div>}
     </section>
+  );
+}
+
+function FileViewer({
+  content,
+  wrap,
+  query,
+  highlight,
+}: {
+  content: string;
+  wrap: boolean;
+  query: string;
+  highlight: string | null;
+}) {
+  const lines = useMemo(() => content.split("\n"), [content]);
+  const needle = query.trim().toLowerCase();
+  const highlights = useMemo(
+    () =>
+      (highlight ?? "")
+        .split("\n")
+        .map((line) => line.trim().toLowerCase())
+        .filter((line) => line.length >= 4),
+    [highlight],
+  );
+  const containerRef = useRef<HTMLPreElement>(null);
+
+  const isHit = useCallback(
+    (line: string) => {
+      const low = line.toLowerCase();
+      if (needle && low.includes(needle)) return true;
+      return highlights.some((part) => low.includes(part));
+    },
+    [needle, highlights],
+  );
+
+  const firstHit = useMemo(
+    () => lines.findIndex((line) => isHit(line)),
+    [lines, isHit],
+  );
+
+  // Scroll the first match (from search or the answer snippet) into view.
+  useEffect(() => {
+    if (firstHit < 0) return;
+    const node = containerRef.current?.querySelector(`[data-line="${firstHit}"]`);
+    node?.scrollIntoView({ block: "center" });
+  }, [firstHit, content]);
+
+  return (
+    <pre
+      ref={containerRef}
+      className="max-h-96 overflow-auto font-mono text-[12px] leading-relaxed"
+    >
+      <code className="block">
+        {lines.map((line, index) => (
+          <div
+            key={index}
+            data-line={index}
+            className={`flex ${isHit(line) ? "bg-amber-500/10" : ""}`}
+          >
+            <span className="sticky left-0 w-10 shrink-0 select-none border-r border-border bg-surface px-2 text-right text-muted">
+              {index + 1}
+            </span>
+            <span
+              className={`px-2 ${
+                wrap ? "whitespace-pre-wrap break-words" : "whitespace-pre"
+              }`}
+            >
+              {line || " "}
+            </span>
+          </div>
+        ))}
+      </code>
+    </pre>
   );
 }

@@ -22,6 +22,7 @@ from app.config import Settings
 from app.services.web_crawler import CrawledPage, CrawlError
 
 _SCRAPE_PATH = "/v2/scrape"
+_SEARCH_PATH = "/v2/search"
 
 
 class FirecrawlError(CrawlError):
@@ -43,6 +44,12 @@ class FirecrawlUnavailableError(FirecrawlError):
 @dataclass
 class ScrapeResult:
     page: CrawledPage
+    credits: int
+
+
+@dataclass
+class SearchResult:
+    pages: list[CrawledPage]
     credits: int
 
 
@@ -133,6 +140,129 @@ async def scrape(
                 format="markdown",
             ),
             credits=credits,
+        )
+
+    if status in (401, 403):
+        raise FirecrawlAuthError(
+            "Kunci Firecrawl tidak valid atau tidak diizinkan. "
+            "Periksa FIRECRAWL_API_KEY di server."
+        )
+    if status in (402, 429):
+        raise FirecrawlQuotaError(
+            _error_message(payload, "Kuota Firecrawl habis atau sedang dibatasi.")
+        )
+    if status >= 500:
+        raise FirecrawlUnavailableError(
+            _error_message(payload, "Firecrawl sedang tidak tersedia.")
+        )
+    raise FirecrawlUnavailableError(
+        _error_message(payload, f"Firecrawl mengembalikan status {status}.")
+    )
+
+
+def _search_items(payload: Any) -> list[dict[str, Any]]:
+    """Normalise the ``/v2/search`` payload into a list of result dicts.
+
+    Firecrawl returns ``{"data": {"web": [...]}}``; some versions return a bare
+    list. Anything unexpected is treated as "no results".
+    """
+    data = payload.get("data") if isinstance(payload, dict) else payload
+    if isinstance(data, dict):
+        for key in ("web", "results"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
+        return []
+    if isinstance(data, list):
+        return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+def _search_credits(payload: Any, fallback: int) -> int:
+    if isinstance(payload, dict):
+        value = payload.get("creditsUsed")
+        if isinstance(value, (int, float)) and value > 0:
+            return int(value)
+    return fallback
+
+
+async def search(
+    query: str,
+    *,
+    settings: Settings,
+    limit: int = 5,
+    scrape: bool = True,
+) -> SearchResult:
+    """Run a Firecrawl web search and return the hits as ``CrawledPage``s.
+
+    With ``scrape=True`` each result carries its page markdown; otherwise the
+    search snippet (``description``) is used as the text so the result is still
+    usable as context at a lower credit cost.
+    """
+    base = (settings.firecrawl_base_url or "").rstrip("/")
+    if not base:
+        raise FirecrawlUnavailableError("Firecrawl base URL tidak dikonfigurasi.")
+    endpoint = base + _SEARCH_PATH
+
+    body: dict[str, Any] = {
+        "query": query,
+        "limit": max(1, min(int(limit), 10)),
+        "sources": ["web"],
+        "timeout": settings.firecrawl_timeout_ms,
+    }
+    if scrape:
+        body["scrapeOptions"] = {
+            "formats": ["markdown"],
+            "onlyMainContent": True,
+            "storeInCache": False,
+        }
+    if settings.firecrawl_check_prompt_injection:
+        body["checkPromptInjection"] = True
+
+    headers = {"Content-Type": "application/json"}
+    if settings.firecrawl_api_key:
+        headers["Authorization"] = f"Bearer {settings.firecrawl_api_key}"
+
+    timeout = settings.firecrawl_timeout_ms / 1000.0 + 5.0
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(endpoint, json=body, headers=headers)
+    except httpx.HTTPError as exc:
+        raise FirecrawlUnavailableError("Firecrawl tidak bisa dihubungi.") from exc
+
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+
+    status = response.status_code
+    if status == 200:
+        pages: list[CrawledPage] = []
+        for item in _search_items(payload):
+            url = _coerce_text(item.get("url"))
+            if not url:
+                continue
+            text = _coerce_text(item.get("markdown")) or _coerce_text(
+                item.get("content")
+            )
+            description = _coerce_text(item.get("description"))
+            if not text:
+                text = description
+            if not text:
+                continue
+            site = urlparse(url).netloc
+            title = _coerce_text(item.get("title")) or site or url
+            pages.append(
+                CrawledPage(
+                    url=url,
+                    title=title,
+                    site=site,
+                    text=text,
+                    format="markdown" if item.get("markdown") else "text",
+                )
+            )
+        return SearchResult(
+            pages=pages, credits=_search_credits(payload, max(len(pages), 1))
         )
 
     if status in (401, 403):

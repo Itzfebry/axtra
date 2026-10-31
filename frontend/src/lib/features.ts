@@ -78,16 +78,16 @@ export const FEATURES: Feature[] = [
   },
   {
     id: "prd",
-    title: "PRD",
-    description: "Dari ide menjadi PRD: spesifikasi, arsitektur, dan task breakdown.",
+    href: "/vibe",
+    title: "Vibe Coding",
+    description: "Dari ide menjadi PRD, arsitektur, test plan, task, dan prompt agent.",
     icon: Code2,
-    phase: 5,
   },
   {
     id: "creator-tools",
+    href: "/images",
     title: "Generated Image",
     description: "Buat gambar dari deskripsi, lengkap dengan gaya dan rasio.",
     icon: ImageIcon,
-    phase: 6,
   },
 ];

@@ -117,6 +117,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setDrawerOpen(false);
   }, [pathname]);
 
+  // Dynamic document title: "Axtra - <page>".
+  useEffect(() => {
+    const map: Record<string, string> = {
+      "/": "Beranda",
+      "/chat": "Chat",
+      "/memory": "Memori",
+      "/profile": "Profil",
+      "/projects": "Proyek",
+      "/jobs": "Cari Kerja",
+      "/images": "Gambar",
+      "/settings": "Pengaturan",
+    };
+    let name = "Axtra";
+    const base = pathname.split("/")[1] ? `/${pathname.split("/")[1]}` : "/";
+    if (map[base]) name = map[base];
+    else if (pathname.startsWith("/jobs/")) name = "Cari Kerja";
+    else if (pathname.startsWith("/projects/")) name = "Proyek";
+    else if (pathname.startsWith("/chat/")) name = "Chat";
+    document.title = name === "Axtra" ? "Axtra" : `Axtra - ${name}`;
+  }, [pathname]);
+
   // Restore persisted sidebar section states once on mount.
   useEffect(() => {
     try {
@@ -175,6 +196,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/projects/") ||
     pathname === "/jobs" ||
     pathname.startsWith("/jobs/") ||
+    pathname === "/images" ||
     pathname === "/settings";
 
   const handleDeleteConversation = useCallback(
@@ -267,6 +289,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Image src="/axtratr.png" alt="" width={22} height={22} priority className="h-[22px] w-[22px] rounded" />
             Axtra
           </Link>
+          <span className="text-[10px] text-muted md:hidden">By ITZAI</span>
           <div className="flex-1" />
           <UsageMeter />
           {menuPage ? (
@@ -288,6 +311,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {pathname.startsWith("/chat/") && <ChatTabs />}
           <PageTransition>{children}</PageTransition>
         </main>
+        <footer className="shrink-0 border-t border-border px-3 py-2 text-center text-[11px] font-medium text-muted">
+          Axtra <span className="font-bold italic">by Itz AI</span> ·{" "}
+          <span className="tracking-wide text-foreground [font-family:var(--font-brand)]">
+            Febry Workstation
+          </span>
+        </footer>
       </div>
     </div>
   );
@@ -327,26 +356,42 @@ function SidebarBody({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className={`flex h-11 shrink-0 items-center ${rail ? "justify-center" : "justify-between px-3"}`}>
-        {!rail && (
-          <Link
-            href="/"
-            onClick={onNavigate}
-            className="flex items-center gap-2 text-sm font-semibold tracking-tight"
-          >
-            <Image src="/axtratr.png" alt="" width={24} height={24} priority className="h-6 w-6 rounded" />
-            Axtra
-          </Link>
+      <div className={`shrink-0 ${rail ? "py-1" : "px-3 py-2"}`}>
+        {rail ? (
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              aria-label="Perluas sidebar"
+              title="Perluas sidebar"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+            >
+              <PanelLeftOpen size={18} aria-hidden />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <Link
+                href="/"
+                onClick={onNavigate}
+                className="flex items-center gap-2 font-semibold tracking-tight"
+              >
+                <Image src="/axtratr.png" alt="" width={28} height={28} priority className="h-7 w-7 rounded" />
+                <span className="text-[17px] leading-none">Axtra</span>
+              </Link>
+            </div>
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              aria-label="Ciutkan sidebar"
+              title="Ciutkan sidebar"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+            >
+              <PanelLeftClose size={18} aria-hidden />
+            </button>
+          </div>
         )}
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          aria-label={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}
-          title={collapsed ? "Perluas sidebar" : "Ciutkan sidebar"}
-          className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
-        >
-          {collapsed ? <PanelLeftOpen size={18} aria-hidden /> : <PanelLeftClose size={18} aria-hidden />}
-        </button>
       </div>
 
       {!rail && (
