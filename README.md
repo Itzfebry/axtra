@@ -414,6 +414,7 @@ Env contoh juga memuat slot `TOGETHER_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API
 - Riwayat sesi menyimpan hasil di state browser; telemetri biaya/jumlah gambar tersimpan di `image_usage_events`.
 - Batas harian `IMAGE_DAILY_LIMIT` ditegakkan server. OpenRouter dengan saldo rendah menampilkan peringatan.
 - Provider gambar bawaan: OpenRouter-style Image API dan Cloudflare Workers AI (termasuk model fallback terkurasi).
+- Image-to-image gratis di Workers AI memakai FLUX.2 (`flux-2-klein-4b`, `flux-2-klein-9b`, `flux-2-dev`). Model ini memakai multipart dengan `input_image_0..3` (maksimal 4 referensi, masing-masing disarankan <512x512); klein berjalan dengan 4 langkah tetap sehingga kontrol `steps` disembunyikan.
 
 ### Pemakaian token
 
