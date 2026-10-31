@@ -183,7 +183,11 @@ async def list_documents(
     return [_to_document(row) for row in (response.data or [])]
 
 
-@router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
 async def delete_document(
     document_id: str,
     user: CurrentUser = Depends(rate_limit),

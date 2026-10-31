@@ -193,7 +193,9 @@ async def update_session(
 
 
 @router.delete(
-    "/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/sessions/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
 )
 async def delete_session(
     project_id: uuid.UUID,
@@ -316,6 +318,7 @@ async def update_decision(
 @router.delete(
     "/sessions/{session_id}/decisions/{decision_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
 )
 async def delete_decision(
     project_id: uuid.UUID,

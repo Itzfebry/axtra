@@ -111,7 +111,11 @@ async def rename_conversation(
     return _to_conversation(response.data[0])
 
 
-@router.delete("/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{conversation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
 async def delete_conversation(
     conversation_id: uuid.UUID, user: CurrentUser = Depends(rate_limit)
 ) -> None:

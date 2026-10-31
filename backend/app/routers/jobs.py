@@ -389,7 +389,7 @@ async def upload_cv(
     return _cv_out(await _get_profile(user.client, user.id))
 
 
-@router.delete("/cv", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/cv", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_cv(user: CurrentUser = Depends(rate_limit)) -> None:
     await (
         user.client.table("job_cv").delete().eq("user_id", user.id).execute()
@@ -475,7 +475,7 @@ async def update_application(
     return _to_out(response.data[0])
 
 
-@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_application(
     job_id: str,
     user: CurrentUser = Depends(rate_limit),

@@ -170,7 +170,7 @@ async def update_project(
     return updated
 
 
-@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_project(
     project_id: uuid.UUID, user: CurrentUser = Depends(rate_limit)
 ) -> None:
@@ -398,7 +398,11 @@ async def list_project_asks(
     return await service.list_asks(str(project_id), limit=limit)
 
 
-@router.delete("/{project_id}/asks/{ask_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{project_id}/asks/{ask_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
 async def delete_project_ask(
     project_id: uuid.UUID,
     ask_id: uuid.UUID,
@@ -407,7 +411,11 @@ async def delete_project_ask(
     await _service(user).delete_ask(str(project_id), str(ask_id))
 
 
-@router.delete("/{project_id}/asks", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{project_id}/asks",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
 async def clear_project_asks(
     project_id: uuid.UUID, user: CurrentUser = Depends(rate_limit)
 ) -> None:
@@ -529,7 +537,9 @@ async def update_project_task(
 
 
 @router.delete(
-    "/{project_id}/tasks/{task_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/{project_id}/tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
 )
 async def delete_project_task(
     project_id: uuid.UUID,
@@ -675,7 +685,9 @@ async def update_project_document(
 
 
 @router.delete(
-    "/{project_id}/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT
+    "/{project_id}/documents/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
 )
 async def delete_project_document(
     project_id: uuid.UUID,

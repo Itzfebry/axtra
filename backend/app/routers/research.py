@@ -319,7 +319,11 @@ async def list_sources(
     return [_to_source(row) for row in (response.data or [])]
 
 
-@router.delete("/sources/{source_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/sources/{source_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+)
 async def delete_source(
     source_id: str,
     user: CurrentUser = Depends(rate_limit),

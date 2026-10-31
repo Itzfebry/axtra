@@ -122,7 +122,7 @@ async def update_one_skill(
     return SkillOut(**row)
 
 
-@router.delete("/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{skill_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_one_skill(
     skill_id: str,
     user: CurrentUser = Depends(rate_limit),

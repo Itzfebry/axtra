@@ -183,7 +183,7 @@ async def update_memory(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Memori tidak ditemukan.") from exc
 
 
-@router.delete("/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{memory_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
 async def delete_memory(memory_id: uuid.UUID, user: CurrentUser = Depends(rate_limit)) -> None:
     memory_service = build_memory_service(user.client)
     await memory_service.delete(user.id, str(memory_id))
