@@ -25,6 +25,8 @@ from app.schemas import (
     ImageGenerateRequest,
     ImageModelOut,
     ImageModelsOut,
+    ImageStyleOut,
+    ImageStyleUpdate,
     ImageUsageOut,
 )
 from app.services.image_service import (
@@ -34,8 +36,11 @@ from app.services.image_service import (
     generate_image,
     get_credits,
     get_image_usage,
+    image_style_entry,
+    image_style_options,
     list_image_models,
     load_image_preference,
+    save_image_style,
     stream_image,
 )
 from app.services.provider_registry import resolve_api_key, resolve_provider_spec
@@ -92,7 +97,7 @@ async def image_config(
     user: CurrentUser = Depends(read_rate_limit),
     settings: Settings = Depends(get_settings),
 ) -> ImageConfigOut:
-    provider, model = await load_image_preference(user.client, user.id)
+    provider, model, style = await load_image_preference(user.client, user.id)
     provider = provider or settings.image_provider or "openrouter"
     model = model or settings.image_model
     spec = await resolve_provider_spec(settings, user.client, user.id, provider)
@@ -107,6 +112,8 @@ async def image_config(
         provider_label=label,
         model=model,
         key_ok=key_ok,
+        style=style,
+        styles=[ImageStyleOut(**item) for item in image_style_options()],
         aspect_ratios=ASPECT_RATIOS,
         resolutions=RESOLUTIONS,
         qualities=QUALITIES,
@@ -125,7 +132,7 @@ async def image_models(
 ) -> ImageModelsOut:
     provider = (provider or "").strip()
     if not provider:
-        provider, _ = await load_image_preference(user.client, user.id)
+        provider, _, _ = await load_image_preference(user.client, user.id)
     provider = provider or settings.image_provider or "openrouter"
     try:
         models = await list_image_models(settings, user.client, user.id, provider)
@@ -150,7 +157,7 @@ async def image_endpoints(
     provider = (provider or "").strip()
     model = (model or "").strip()
     if not provider:
-        provider, stored_model = await load_image_preference(user.client, user.id)
+        provider, stored_model, _ = await load_image_preference(user.client, user.id)
         model = model or stored_model
     provider = provider or settings.image_provider or "openrouter"
     if not model:
@@ -189,6 +196,16 @@ async def image_usage(
     return ImageUsageOut(**usage)
 
 
+@router.put("/style", response_model=ImageStyleOut)
+async def set_style(
+    payload: ImageStyleUpdate,
+    user: CurrentUser = Depends(rate_limit),
+) -> ImageStyleOut:
+    """Save the default image style used by the Generated Image page."""
+    style = await save_image_style(user.client, user.id, payload.style)
+    return ImageStyleOut(**image_style_entry(style))
+
+
 @router.post("/generate", response_model=ImageGenerateOut)
 async def generate(
     payload: ImageGenerateRequest,
@@ -214,6 +231,7 @@ async def generate(
             output_compression=payload.output_compression,
             seed=payload.seed,
             steps=payload.steps,
+            style=payload.style,
             input_references=payload.input_references,
             provider_routing=_routing(payload),
             n=payload.n,
@@ -256,6 +274,7 @@ async def generate_stream(
             background=payload.background,
             seed=payload.seed,
             steps=payload.steps,
+            style=payload.style,
             input_references=payload.input_references,
             provider_routing=_routing(payload),
             n=payload.n,

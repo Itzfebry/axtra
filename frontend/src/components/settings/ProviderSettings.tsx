@@ -5,7 +5,6 @@ import {
   Check,
   Cpu,
   ExternalLink,
-  Image as ImageIcon,
   KeyRound,
   Loader2,
   Plus,
@@ -29,7 +28,6 @@ import {
   listProviders,
   listProviderModels,
   pingProvider,
-  saveProviderImageSelection,
   saveProviderKey,
   saveProviderSelection,
   type Provider,
@@ -94,9 +92,6 @@ export function ProviderSettings() {
     title: string;
     message?: string;
   } | null>(null);
-  const [imageProviderId, setImageProviderId] = useState("");
-  const [imageModel, setImageModel] = useState("");
-
   const provider = useMemo(
     () => providers?.find((item) => item.id === activeId) ?? null,
     [providers, activeId],
@@ -117,23 +112,6 @@ export function ProviderSettings() {
       setError(err instanceof Error ? err.message : "Gagal memuat provider."),
     );
   }, [load]);
-
-  useEffect(() => {
-    if (!providers) return;
-    const imageProvider = providers.find((item) => item.active_image);
-    if (imageProvider) {
-      setImageProviderId((current) => current || imageProvider.id);
-      setImageModel((current) => current || imageProvider.selected_image_model);
-    } else {
-      setImageProviderId(
-        (current) =>
-          current ||
-          providers.find((item) => item.id === "openrouter")?.id ||
-          providers[0]?.id ||
-          "",
-      );
-    }
-  }, [providers]);
 
   const loadQuota = useCallback(async (providerId: string) => {
     try {
@@ -298,29 +276,6 @@ export function ProviderSettings() {
     }
   }
 
-  async function handleSaveImageModel() {
-    if (!imageProviderId) return;
-    setBusy("image");
-    setError(null);
-    try {
-      await saveProviderImageSelection(imageProviderId, imageModel.trim());
-      setModal({
-        tone: "success",
-        title: "Model gambar disimpan",
-        message: imageModel.trim() || "(kosong)",
-      });
-      await load();
-    } catch (err) {
-      setModal({
-        tone: "error",
-        title: "Gagal menyimpan model gambar",
-        message: err instanceof Error ? err.message : "Terjadi kesalahan.",
-      });
-    } finally {
-      setBusy(null);
-    }
-  }
-
   async function handleDeleteProvider() {
     if (!provider) return;
     if (
@@ -381,11 +336,12 @@ export function ProviderSettings() {
         </p>
       )}
 
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)]">
       {/* Provider selector */}
       <div className="rounded-xl border border-border bg-surface p-4">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-[12px] uppercase tracking-wide text-muted">
-            Provider
+            Provider teks
           </h2>
           <button
             type="button"
@@ -460,7 +416,7 @@ export function ProviderSettings() {
           </form>
         )}
 
-        <ul className="mt-3 divide-y divide-border overflow-hidden rounded-lg border border-border">
+        <ul className="mt-3 max-h-80 divide-y divide-border overflow-y-auto rounded-lg border border-border">
           {providers.map((item) => {
             const status = statusLabel(item);
             const selected = item.id === activeId;
@@ -513,9 +469,7 @@ export function ProviderSettings() {
       </div>
 
       {provider && (
-        <>
-          {/* Key + connection */}
-          <div className="rounded-xl border border-border bg-surface p-4">
+        <div className="rounded-xl border border-border bg-surface p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <h2 className="text-[13px] font-medium text-foreground">
@@ -637,12 +591,16 @@ export function ProviderSettings() {
                 </button>
               )}
             </div>
-          </div>
+        </div>
+      )}
+      </div>
 
+      {provider && (
+        <>
           {/* Quota */}
           <div className="rounded-xl border border-border bg-surface p-4">
             <h2 className="text-[12px] uppercase tracking-wide text-muted">
-              Kuota token
+              Kuota model teks
             </h2>
             <p className="mt-1 text-[11px] text-muted">
               Angka dari pemakaian Axtra (rolling 1 menit) dan batas yang diatur
@@ -681,63 +639,13 @@ export function ProviderSettings() {
             )}
           </div>
 
-          {/* Image generation slot */}
-          <div className="rounded-xl border border-border bg-surface p-4">
-            <h2 className="flex items-center gap-1.5 text-[12px] uppercase tracking-wide text-muted">
-              <ImageIcon size={12} aria-hidden /> Model gambar
-            </h2>
-            <p className="mt-1 text-[11px] text-muted">
-              Dipakai halaman Generated Image lewat Image API. Harus provider yang
-              mendukung Image API (saat ini OpenRouter). Tidak ada model gambar gratis;
-              butuh kredit.
-            </p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
-              <select
-                value={imageProviderId}
-                onChange={(event) => setImageProviderId(event.target.value)}
-                aria-label="Provider gambar"
-                className={inputClass}
-              >
-                <option value="">— provider —</option>
-                {providers.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.label}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={imageModel}
-                onChange={(event) => setImageModel(event.target.value)}
-                placeholder="mis. google/gemini-3-pro-image"
-                aria-label="Model gambar"
-                className={inputClass}
-                autoComplete="off"
-              />
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => void handleSaveImageModel()}
-                disabled={busy !== null || !imageProviderId}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
-              >
-                {busy === "image" ? (
-                  <Loader2 size={12} className="animate-spin" aria-hidden />
-                ) : (
-                  <ImageIcon size={12} aria-hidden />
-                )}
-                Simpan model gambar
-              </button>
-            </div>
-          </div>
-
           {/* Recommendations */}
           {recs.length > 0 && (
             <div className="rounded-xl border border-border bg-surface p-4">
               <h2 className="flex items-center gap-1.5 text-[12px] uppercase tracking-wide text-muted">
                 <Sparkles size={12} aria-hidden /> Rekomendasi
               </h2>
-              <ul className="mt-3 space-y-2">
+              <ul className="mt-3 grid gap-2 md:grid-cols-2 2xl:grid-cols-3">
                 {recs.map((rec) => (
                   <li
                     key={rec.model}
@@ -773,9 +681,18 @@ export function ProviderSettings() {
           {/* Models */}
           <div className="rounded-xl border border-border bg-surface p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-[12px] uppercase tracking-wide text-muted">
-                Model tersedia
-              </h2>
+              <div>
+                <h2 className="text-[12px] uppercase tracking-wide text-muted">
+                  Katalog model teks
+                </h2>
+                <p className="mt-0.5 text-[11px] text-muted">
+                  Aktif:{" "}
+                  <span className="text-foreground">
+                    {provider.selected_model || "belum dipilih"}
+                  </span>{" "}
+                  · {provider.label}
+                </p>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -804,7 +721,7 @@ export function ProviderSettings() {
                   type="search"
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Cari model..."
+                  placeholder="Cari model teks..."
                   className={`${inputClass} pl-8`}
                 />
               </div>
@@ -829,7 +746,7 @@ export function ProviderSettings() {
                   {visibleModels.length} dari {catalog.count} model
                   {catalog.cached ? " · cache" : ""}
                 </p>
-                <ul className="mt-2 max-h-96 space-y-1.5 overflow-y-auto pr-1">
+                <ul className="mt-2 grid max-h-[36rem] gap-1.5 overflow-y-auto pr-1 md:grid-cols-2 2xl:grid-cols-3">
                   {visibleModels.map((model) => {
                     const selected = provider.selected_model === model.id;
                     return (

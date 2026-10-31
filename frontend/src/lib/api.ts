@@ -1753,6 +1753,8 @@ export type ImageConfig = {
   provider_label: string;
   model: string;
   key_ok: boolean;
+  style: string;
+  styles: ImageStyle[];
   aspect_ratios: string[];
   resolutions: string[];
   qualities: string[];
@@ -1760,6 +1762,11 @@ export type ImageConfig = {
   backgrounds: string[];
   max_n: number;
   daily_limit: number;
+};
+
+export type ImageStyle = {
+  id: string;
+  label: string;
 };
 
 export type ImageModel = {
@@ -1813,6 +1820,7 @@ export type ImageGenerateInput = {
   quality?: string;
   output_format?: string;
   background?: string;
+  style?: string;
   output_compression?: number;
   seed?: number;
   steps?: number;
@@ -1878,6 +1886,13 @@ export async function fetchImageEndpoints(
 
 export async function fetchImageUsage(): Promise<ImageUsage> {
   return apiFetch<ImageUsage>("/images/usage");
+}
+
+export async function saveImageStyle(style: string): Promise<ImageStyle> {
+  return apiFetch<ImageStyle>("/images/style", {
+    method: "PUT",
+    body: JSON.stringify({ style }),
+  });
 }
 
 export async function generateImage(

@@ -1,213 +1,490 @@
 # Axtra
 
-Personal AI agent yang memahami pengguna secara berkelanjutan melalui sistem memori, membantu pengembangan diri dan proyek, serta menjalankan pekerjaan proaktif.
+Personal AI agent yang memahami pengguna secara berkelanjutan melalui memori, membantu pengembangan diri, proyek, pencarian kerja, dan produksi visual dalam satu ruang kerja.
 
-> **Status:** Phase 1 (Core Chat & Memory) + Project workspace, Cari Kerja, dan **Vibe Coding MVP** (PRD §4.5).
-> Belum termasuk: journal, mentor otomatis, automation, GitHub read/write, creator tools.
+> **Status dokumen:** kondisi implementasi per 31 Oktober 2026.
+> **Fase aktif:** Phase 1 selesai; Phase 2 dan Phase 5 sebagian besar selesai; Riset Web dan Generated Image sudah berjalan; automation, Telegram/push, journal, target, dan AI Mentor belum.
 
-## Struktur
+## Ringkasan fitur saat ini
 
+| Area | Status | Ringkasan |
+|---|---|---|
+| Chat multi-mode | ✅ | General, Curhat, Brainstorming, Document, Riset Web; SSE, opsi jawaban, stop, tab chat, slash command, `@mention` |
+| Memori personal | ✅ | Ekstraksi otomatis, CRUD manual, pencarian semantik/keyword, cluster + merge topik |
+| Multi-provider LLM | ✅ | Groq, OpenRouter, OpenAI, Google Gemini, Cloudflare Workers AI, provider custom OpenAI-compatible |
+| Pengaturan model | ✅ | Tab **Model teks** dan **Model gambar** terpisah; key user terenkripsi di server |
+| Skills terstruktur | ✅ | Skill Markdown + metadata, relasi many-to-many per fitur, import `SKILL.md`, preview |
+| Peran & perilaku | ✅ | Persona per mode/fitur, instruksi bebas, provider crawl per user |
+| Riset Web | ✅ | Crawl URL, pencarian web Firecrawl, sumber per percakapan, simpan sumber ke memori |
+| Proyek | ✅ | Metadata, label, data non-repo, indeks repo GitHub, RAG kode, papan tugas, kesehatan AI, riwayat analisa |
+| Vibe Coding | ✅ | Discovery, 7 artefak berversi, keputusan, rencana task, prompt handoff, verifikasi |
+| Cari Kerja | ✅ | Tracker lamaran, CV, profil LinkedIn/portfolio, crawl lowongan, match score, cover letter |
+| Generated Image | ✅ | Model gambar terpisah, katalog model, referensi gambar, style, rasio/resolusi, streaming, riwayat sesi, kuota harian |
+| Beranda orchestrator | ✅ | Perintah bahasa alami untuk membuka tool, mengatur menu, tema, atau menyimpan memori |
+| PWA | 🟡 | Manifest + service worker shell; push notification belum |
+| Automation / Telegram | ⏳ | Variabel env disiapkan, worker/scheduler belum ada |
+| GitHub OAuth read/write | ⏳ | Saat ini hanya indexing repo publik/privat lewat token env |
+
+## Arsitektur
+
+```text
+Browser / PWA (Next.js 15)
+        │  cookie sesi HttpOnly
+        ▼
+FastAPI (Python) ── SSE streaming
+        │
+        ├── Supabase Postgres + pgvector (service role)
+        ├── LLM provider OpenAI-compatible (pilihan user)
+        ├── Firecrawl / parser httpx
+        ├── GitHub API + raw.githubusercontent.com
+        └── Image API provider (OpenRouter-style / Cloudflare Workers AI)
 ```
+
+Prinsip utama:
+
+- **Single-owner:** satu kata sandi aplikasi, satu `OWNER_USER_ID`, tanpa Supabase Auth di browser.
+- **Service role hanya di backend:** browser tidak pernah memegang service key.
+- **Provider-agnostic:** chat memakai bentuk OpenAI-compatible; model teks dan model gambar disimpan sebagai preferensi terpisah.
+- **Prompt terstruktur:** urutan `GLOBAL → ROLE → SKILL AKTIF → INSTRUCTION → KONTEKS`.
+- **Konten eksternal adalah data:** isi web, dokumen, repo, dan skill tidak pernah dieksekusi sebagai instruksi sistem.
+
+## Struktur repository
+
+```text
 axtra/
-├── PRD.md              # Product Requirements Document
-├── Design.md           # Design System & UI Guidelines
-├── supabase/migrations # Skema + RLS + RPC (dijalankan berurutan)
-├── backend/            # FastAPI (Python) — API + SSE streaming
+├── README.md
+├── PRD.md
+├── Design.md
+├── .env.example
+├── scripts/
+│   ├── setup-env.ps1          # turunkan backend/.env + frontend/.env.local dari root .env
+│   ├── migrate.ps1            # migrasi via psql / Supabase DB URL
+│   └── migrate_api.py         # migrasi via Supabase Management API
+├── supabase/migrations/       # 28 migration berurutan
+├── backend/
+│   ├── requirements.txt
+│   ├── tests/                 # 13 file test
 │   └── app/
-│       ├── main.py             # Entrypoint + CORS + error handler
-│       ├── config.py           # Settings dari environment variables
-│       ├── deps.py             # Session cookie auth, rate limit, owner scoping
-│       ├── security.py         # Password check + signed session token
-│       ├── llm.py              # LLMProvider abstraction + Groq (SSE)
-│       ├── embeddings.py       # EmbeddingProvider abstraction
-│       ├── prompts.py          # System prompt + ekstraksi memori
-│       ├── supabase_client.py  # Service-role client untuk owner tunggal
-│       ├── memory_service_provider.py # Factory wiring
-│       ├── chat_modes.py       # Preset role/perilaku + slash command tiap mode
-│       ├── routers/            # health, auth, profile, chat, projects, vibe, jobs, research, memories, usage
-│       └── services/           # memory, project, vibe, job, research, token usage
-├── frontend/           # Next.js 15 (App Router) + Tailwind v4 + PWA
-│   └── src/
-│       ├── app/        # /, /login, /chat, /memory, /profile, /settings, /projects, /projects/[id]/vibe/[sessionId]
-│       ├── components/ # AppShell, ChatPanel, ChatModePicker, ModeSettings, FeatureMenu, UsageMeter, Markdown, ThemeToggle
-│       ├── lib/        # API client (cookie session), SSE, konfigurasi mode chat
-│       └── middleware.ts # Proteksi rute via cookie sesi
-└── scripts/setup-env.ps1 # Turunkan backend/.env + frontend/.env.local dari root .env
+│       ├── main.py            # FastAPI, CORS, gzip selektif, error handler
+│       ├── config.py          # environment variables
+│       ├── deps.py            # cookie auth, rate limit, owner scoping
+│       ├── chat_modes.py      # preset persona + slash command
+│       ├── provider_catalog.py# katalog provider bawaan
+│       ├── llm.py             # adapter OpenAI-compatible + SSE
+│       ├── prompts.py         # system prompt + ekstraksi memori
+│       ├── routers/           # auth, chat, profile, memories, skills, projects, jobs, research, images, dll.
+│       └── services/          # memory, projects, vibe, jobs, image, crawl, usage, provider, skill
+└── frontend/
+    ├── src/app/               # /, /login, /chat, /memory, /profile, /settings, /projects, /jobs, /images, /vibe
+    ├── src/components/        # shell, chat, jobs, proyek, settings, skill, UI
+    ├── src/lib/               # API client, SSE, chat modes, menu config, metadata
+    ├── public/                # manifest, service worker, ikon
+    └── src/middleware.ts      # proteksi rute via cookie sesi
 ```
 
 ## Prasyarat
 
-| Layanan | Kegunaan | Keterangan |
+| Layanan | Wajib | Kegunaan |
 |---|---|---|
-| [Supabase](https://supabase.com) | Database + pgvector | Project baru, jalankan semua migration berurutan |
-| [Groq](https://console.groq.com) | LLM inference (chat + ekstraksi) | API key |
-| Hugging Face (opsional) | Embedding untuk pencarian semantik | Tanpa ini → keyword search |
-| Node.js ≥ 20 + Python ≥ 3.11 | Runtime | — |
+| Supabase | Ya | Postgres + pgvector + RPC |
+| LLM provider | Ya, salah satu | Groq, OpenRouter, OpenAI, Gemini, Cloudflare, atau endpoint custom |
+| Node.js ≥ 20 | Ya | Frontend Next.js |
+| Python ≥ 3.11 | Ya | Backend FastAPI |
+| Firecrawl | Opsional | Pencarian web dan crawl halaman berat JavaScript |
+| Hugging Face | Opsional | Embedding semantik; tanpa ini memori memakai keyword search |
+| GitHub token | Opsional | Repo privat dan rate limit lebih tinggi |
+| Image provider | Opsional | OpenRouter/Cloudflare untuk halaman Generated Image |
 
 ## Setup
 
-### 1. Database (Supabase)
+### 1. Environment
 
-Migration sudah dalam format Supabase CLI. Dua cara:
+```bash
+cp .env.example .env
+```
 
-**A. Lewat CLI (butuh database password):**
+Isi minimal:
+
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+- `APP_PASSWORD`, `SESSION_SECRET`, `APP_ENCRYPTION_KEY`
+- salah satu kunci provider, mis. `GROQ_API_KEY`
+- `NEXT_PUBLIC_API_URL=http://localhost:8000`
+
+Di Windows, `scripts/setup-env.ps1` dapat membuat `APP_PASSWORD`, `SESSION_SECRET`, dan `APP_ENCRYPTION_KEY` yang kosong lalu menurunkan nilai ke `backend/.env` dan `frontend/.env.local`.
+
+### 2. Database
+
+Jalankan seluruh file di `supabase/migrations/` sesuai urutan nama.
+
+**A. Supabase CLI / psql**
 
 ```bash
 npx supabase db push --db-url "postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres" --include-all
 ```
 
-Atau urut pakai file di `supabase/migrations/`:
+atau:
 
-1. `20260101000001_init.sql` — tabel `profiles`, `conversations`, `messages`, `memories`, `memory_embeddings` (extension `vector`).
-2. `20260101000002_rls.sql` — Row Level Security per user.
-3. `20260101000003_functions.sql` — RPC `match_memories_semantic` & `search_memories_keyword`.
-4. `20260101000004_single_user.sql` — lepas FK ke `auth.users`, owner tunggal `00000000-0000-0000-0000-000000000001`, hapus policy per-user (anon ditolak, service role diizinkan).
-5. `20260101000005_retrieval_single_user.sql` — RPC retrieval tanpa filter `auth.uid()` (service role tidak punya klaim user), grant ke `service_role`.
-6. `20260101000006_chat_modes_documents.sql` — kolom `conversations.mode` (`general`/`curhat`/`brainstorming`/`document`) + tabel `chat_documents` untuk teks lampiran.
-7. `20260101000007_token_usage.sql` — tabel `token_usage_events` (satu baris per panggilan LLM) + RPC `get_token_usage` untuk agregat TPM & harian.
-8. `20260101000008`–`20260101000018` — proyek, index kode repo, task/ask, dokumen proyek, riset, lamaran kerja, crawl usage.
-9. `20260101000019_vibe_workspace.sql` — **Vibe Coding**: `vibe_sessions`, `vibe_messages`, `vibe_decisions`, `vibe_artifacts`, `vibe_artifact_versions`, plus kolom rencana/verifikasi pada `project_tasks` (forward-only, nullable/defaulted sehingga papan tugas lama tetap berjalan).
-10. `20260101000022_feature_skills.sql` — tabel `skills` awal (per-fitur).
-11. `20260101000023_skill_system.sql` — **Sistem Skills terstruktur**: rename `instruction`→`content`, tambah metadata (`slug`, `category`, `version`, `source`, `license`, `status`), tabel relasi `feature_skills` (many-to-many), backfill slug + pindahkan assignment lama, index/constraint/RLS/grant.
-12. `20260101000024_job_profile_links.sql` — **Cari Kerja**: kolom `linkedin_url`, `portfolio_url`, `portfolio_content`, `linkedin_content`, `links_updated_at` pada `job_cv`.
+```powershell
+powershell -File scripts/migrate.ps1
+```
 
-**B. Lewat Dashboard → SQL Editor:** paste seluruh file di `supabase/migrations/` sesuai urutan nama.
+**B. Management API**
 
-> Penting: nama extension di Supabase adalah `vector` (bukan `pgvector`), dan fungsi similarity memakai `search_path = public, extensions`.
+```bash
+python scripts/migrate_api.py
+```
 
-### 2. Backend
+**C. Dashboard → SQL Editor**
+
+Paste setiap file migration sesuai urutan.
+
+Catatan:
+
+- Nama extension di Supabase adalah `vector`, bukan `pgvector`.
+- Fungsi retrieval memakai `search_path = public, extensions`.
+- RLS aktif tanpa policy per-user; hanya service role backend yang dapat membaca/menulis.
+- Migration bersifat forward-only. Beberapa migration mengubah constraint dan melakukan backfill data.
+
+### 3. Backend
 
 ```bash
 cd backend
-cp .env.example .env      # isi SUPABASE_*, GROQ_API_KEY
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt   # (Windows)
+.venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python -m uvicorn app.main:app --reload --port 8000
 ```
 
-Verifikasi: `curl http://localhost:8000/api/health`
-
-### 3. Frontend
-
-```bash
-cd frontend
-cp .env.example .env.local   # isi NEXT_PUBLIC_*
-npm install
-npm run dev                  # http://localhost:3000
-```
-
-### 4. Environment variables lengkap
-
-| Variable | Di mana | Fungsi |
-|---|---|---|
-| `SUPABASE_URL` | backend | Supabase project URL |
-| `SUPABASE_ANON_KEY` | backend | Kunci anon (tidak dipakai browser lagi) |
-| `SUPABASE_SERVICE_ROLE_KEY` | backend | Akses penuh; satu-satunya jalur data (jangan pernah ke browser) |
-| `APP_PASSWORD` | backend | Satu kata sandi login (dibuat otomatis oleh `scripts/setup-env.ps1` bila kosong) |
-| `SESSION_SECRET` | backend | Menandatangani cookie sesi (dibuat otomatis bila kosong) |
-| `OWNER_USER_ID` | backend | UUID owner tetap (default `00000000-0000-0000-0000-000000000001`) |
-| `SESSION_TTL_HOURS` | backend | Umur sesi cookie (default 720 = 30 hari) |
-| `GROQ_API_KEY` | backend | Inference |
-| `GROQ_CHAT_MODELS` | backend | Daftar model fallback (koma). Default: `openai/gpt-oss-120b,openai/gpt-oss-20b` |
-| `EMBEDDING_PROVIDER` | backend | `none` \| `huggingface` |
-| `EMBEDDING_DIM` | backend | Harus = dimensi kolom (default 384) |
-| `MEMORY_RETRIEVAL_COUNT` | backend | Jumlah memori yang diambil per jawaban |
-| `RATE_LIMIT_PER_MINUTE` | backend | Guardrail tulis/LLM per user (default 30) |
-| `READ_RATE_LIMIT_PER_MINUTE` | backend | Guardrail baca (sidebar/riwayat/dokumen) per user (default 300) |
-| `MAX_UPLOAD_BYTES` | backend | Batas ukuran file lampiran (default 10485760 = 10 MB) |
-| `MAX_DOCUMENT_CHARS` | backend | Batas total karakter dokumen yang disuntik ke prompt (default 12000) |
-| `RESEARCH_MAX_CHARS` | backend | Batas total karakter sumber web yang disuntik ke prompt (default 12000) |
-| `RESEARCH_MAX_SOURCES` | backend | Maks sumber web per percakapan (default 5) |
-| `RESEARCH_SEARCH_LIMIT` | backend | Jumlah hasil per pencarian web Firecrawl (default 5, maks 10) |
-| `RESEARCH_FETCH_TIMEOUT` | backend | Timeout crawl per halaman, detik (default 15) |
-| `RESEARCH_MAX_BYTES` | backend | Batas byte HTML yang dibaca per halaman (default 2097152 = 2 MB) |
-| `SKILL_MAX_CHARS` | backend | Batas karakter konten satu skill yang disuntik ke prompt (default 6000) |
-| `SKILLS_MAX_TOTAL_CHARS` | backend | Batas total karakter seluruh skill aktif per prompt (default 12000) |
-| `SKILLS_MAX_PER_FEATURE` | backend | Maksimum skill aktif yang dimuat per fitur (default 6) |
-| `CRAWL_PROVIDER` | backend | Provider crawl default: `httpx` (bawaan) atau `firecrawl` (default `httpx`) |
-| `FIRECRAWL_API_KEY` | backend | Kunci Firecrawl (hanya di server; kosong = Firecrawl nonaktif untuk cloud) |
-| `FIRECRAWL_BASE_URL` | backend | Base URL Firecrawl (default `https://api.firecrawl.dev`; isi URL self-host bila perlu) |
-| `FIRECRAWL_ALLOW_EMPTY_KEY` | backend | `true` hanya untuk self-host tanpa auth; cloud wajib berisi key (default `false`) |
-| `FIRECRAWL_TIMEOUT_MS` | backend | Timeout scrape Firecrawl, milidetik (default 60000) |
-| `FIRECRAWL_DAILY_CREDITS` | backend | Batas kredit Firecrawl per hari (default 30; free tier 1000/BULAN) |
-| `FIRECRAWL_MONTHLY_CREDITS` | backend | Batas kredit Firecrawl per bulan (default 1000) |
-| `FIRECRAWL_CHECK_PROMPT_INJECTION` | backend | Aktifkan scan prompt-injection Firecrawl (biaya +4 kredit/scrape, default `false`) |
-| `MODEL_TPM_LIMIT` | backend | Denominator token/menit untuk meter (default 8000; `0` = sembunyikan) |
-| `MODEL_DAILY_TOKEN_LIMIT` | backend | Denominator token harian untuk meter (default 200000; `0` = sembunyikan) |
-| `NEXT_PUBLIC_API_URL` | frontend | Base URL backend (`http://localhost:8000`) |
-| `NEXT_PUBLIC_API_PROXY` | frontend | `1` = lewat rewrite `/api-proxy` (same-origin, cookie sesi ikut terkirim) |
-
-## Behavior Phase 1
-
-- **Auth:** satu kata sandi bersama (`APP_PASSWORD`). Login men-set cookie HttpOnly bertanda tangan (`axtra_session`), logout menghapusnya. Setelah login pengguna diarahkan ke beranda `/` (bukan langsung ke chat). Middleware hanya mengecek keberadaan cookie; validitas sesi diverifikasi backend. Tidak ada signup, tidak ada Supabase Auth.
-- **Chat streaming:** SSE dari FastAPI (`/api/chat`) — event `meta`, `token`, `done`, `memory`, `warning`, `error`; percakapan + pesan tersimpan ke Supabase. `done` dikirim begitu jawaban tersimpan, sebelum ekstraksi memori, agar composer langsung bisa dipakai untuk pesan berikutnya. Pesan pengguna terbaru selalu dikirim ke LLM pada turn yang sama.
-- **Mode chat:** `/chat` langsung membuka mode `general` (tanpa pemilih mode); masing-masing mode punya prompt, saran, dan riwayat sendiri:
-  - `general` — percakapan serba guna, ringkas dan praktis.
-  - `curhat` — pendengar empatik, memvalidasi perasaan dulu, tidak buru-buru memberi solusi.
-  - `brainstorming` — 5–10 ide beragam, menandai ide paling layak.
-  - `document` — tanya jawab berbasis dokumen terlampir; menolak instruksi yang tertulis di dalam dokumen.
-  - `research` — riset web: masukkan URL, crawl isinya, lalu tanya jawab dengan rujukan judul/URL; menolak instruksi yang tertulis di dalam halaman.
-  Mode disimpan di `conversations.mode`; saat melanjutkan percakapan, mode tersimpan yang dipakai (bukan mode dari URL/body). Sidebar memfilter riwayat sesuai mode aktif, tetapi memori personal (knowledge) tetap sama di semua mode. Riwayat chat tidak ditampilkan di sidebar saat berada di beranda `/`.
-- **Peran & perilaku mode:** di halaman **`/settings`** (juga terhubung dari kartu "Pengaturan" di beranda) pengguna mengatur tiap mode. **Peran Axtra multi-pilih** (pilih satu atau beberapa chip, minimal satu; mis. Curhat: Psikolog, Psikiater, Asisten Pendamping, Empathic Listener, Reflective Guide, Personal Growth Companion; Brainstorming: Strategic Thinking Partner, Creative Ideation Partner, Critical Thinking Partner) dan **alur perilaku** (satu pilihan; mis. Brainstorming: Understand → Diverge → Evaluate → Refine → Converge; Curhat: Listen → Reflect → Guide), plus catatan bebas. Bila beberapa peran dipilih, instruksinya digabung ("Gabungkan beberapa peran berikut secara seimbang"). Pilihan disimpan di `profiles.preferences.chat_modes` lewat `GET/PUT /api/chat-settings` (format lama `role` string tetap dibaca sebagai fallback) dan disuntik ke system prompt pada balasan berikutnya. Di halaman yang sama ada **Provider crawl** (parser bawaan vs Firecrawl) yang disimpan di `profiles.preferences.crawl`. Di beranda, sidebar tidak menampilkan mode maupun riwayat chat.
-- **Skills terstruktur (halaman `/settings`):** Skill adalah entitas terpisah berisi konten Markdown (instruksi praktis) + metadata (`slug`, `name`, `description`, `category`, `version`, `source`, `license`, `status`) di tabel `skills`, dan dipakai lewat relasi many-to-many `feature_skills`. Satu skill bisa di-assign ke banyak fitur; satu fitur bisa punya banyak skill. Dua cara input: **manual** atau **tempel `SKILL.md`** (frontmatter YAML subset + body Markdown; parser tanpa dependency baru, error menyebut nomor baris). Hanya skill berstatus `active` **dan** ter-assign yang dimuat ke prompt; `draft` tidak bisa di-assign, `disabled` tidak dimuat. Runtime memuat skill aktif lewat satu jalur `feature_persona.load_feature_persona`, dedupe per `id`, urut `position`, dengan cap `SKILL_MAX_CHARS` per-skill, `SKILLS_MAX_TOTAL_CHARS` total, dan `SKILLS_MAX_PER_FEATURE` jumlah. Blok skill disisipkan satu system message dengan urutan GLOBAL → ROLE → SKILL AKTIF → INSTRUCTION → KONTEKS. Konten skill hanya teks dan **tidak pernah dieksekusi**. Field teks `skills` lama tetap dibaca sebagai fallback bila sebuah fitur belum punya assignment DB. Endpoint: `GET/POST /api/skills`, `GET/PATCH/DELETE /api/skills/{id}`, `POST /api/skills/parse`; assignment lewat `PUT /api/feature-settings/{feature}` (`skill_ids`) dan `GET /api/feature-settings` (mengembalikan `skills`, `assignments`, `skill_counts`).
-- **Slash command:** hanya aktif di mode terkait. Ketik `/` di composer untuk membuka palet (navigasi ↑/↓, Enter memilih, Esc menutup); command terpilih tampil sebagai chip dan dikirim sebagai field `command`, lalu instruksinya ditambahkan ke system prompt hanya untuk turn itu (tersimpan di `messages.metadata.command`).
-  - `curhat`: `/curhat`, `/listen`, `/reflect`, `/perspective`, `/advice`, `/journal`
-  - `brainstorming`: `/brainstorm`, `/challenge`, `/evaluate`, `/refine`, `/plan`, `/decide`
-  - `research`: `/crawl`, `/summarize`, `/compare`, `/keypoints`, `/cite`, `/extract`
-- **Riset Web (mode Research):** composer punya dua input — **Cari di web** (Firecrawl `/v2/search`) dan **Crawl URL**. Pencarian web mengembalikan beberapa hasil sekaligus (judul, URL, markdown/snippet) dan menyimpannya sebagai `research_sources`; crawl mengambil satu halaman lewat provider crawl. Keduanya menyimpan teks (bukan HTML mentah) terikat pada satu percakapan. Isinya disuntik ke prompt (dipotong `RESEARCH_MAX_CHARS`). Jika URL yang sama sudah ada di percakapan itu, sumber tidak diduplikasi (cache per percakapan, tidak lintas user). Endpoint: `POST /api/research/search` (body `{query, limit?, conversation_id?}`, hanya aktif bila `firecrawl_ready`), `POST /api/research/crawl`, `GET /api/research/sources?conversation_id=`, `DELETE /api/research/sources/{id}`. Batas: `RESEARCH_MAX_SOURCES` (default 5, berlaku untuk gabungan search + crawl), `RESEARCH_SEARCH_LIMIT` (default 5 hasil per query, maks 10), `RESEARCH_FETCH_TIMEOUT` (default 15 dtk, untuk parser bawaan), `RESEARCH_MAX_BYTES` (default 2 MB, parser bawaan).
-- **Pencarian web (Riset Web):** memakai Firecrawl `/v2/search` dengan `sources:["web"]` dan `scrapeOptions` markdown, jadi tiap hasil langsung membawa isi halaman. Search **tidak punya fallback** ke parser bawaan (httpx hanya bisa fetch URL yang sudah diketahui). Kredit search + scrape dicatat di `crawl_usage_events` dengan `url` berawalan `search:` dan tetap dibatasi `FIRECRAWL_DAILY_CREDITS`/`FIRECRAWL_MONTHLY_CREDITS`. `limit` otomatis dipotong oleh sisa `RESEARCH_MAX_SOURCES`.
-- **Provider crawl (Riset Web + crawl lowongan):** dua opsi yang bisa diganti per user di `/settings`:
-  - **Parser bawaan (`httpx`)** — default; gratis, privat, mengekstrak teks dengan parser standard library, tanpa dependensi eksternal.
-  - **Firecrawl (`firecrawl`)** — opt-in; `POST /v2/scrape` dengan `formats:["markdown"]`, `onlyMainContent:true`, `storeInCache:false`. Output berupa **markdown**, lebih baik untuk halaman berat JavaScript. Kunci API hanya disimpan di env server (`FIRECRAWL_API_KEY`); preferensi user hanya menyimpan **nama** provider di `profiles.preferences.crawl`. `PUT /api/chat-settings/crawl`; status efektif ada di `GET /api/chat-settings` (`crawl`).
-  - **Fallback otomatis:** bila Firecrawl kena kredit habis (`402`), rate limit (`429`), timeout, atau error jaringan, crawl dialihkan ke parser bawaan dengan catatan singkat di hasil. Kunci tidak valid (`401/403`) ditampilkan sebagai pesan jelas tanpa fallback. Kredit Firecrawl dicatat di `crawl_usage_events` (sukses **dan** gagal) dan dibatasi `FIRECRAWL_DAILY_CREDITS`/`FIRECRAWL_MONTHLY_CREDITS`.
-  - **Self-host Firecrawl:** isi `FIRECRAWL_BASE_URL` ke instance lokal dan, hanya bila instance benar-benar tanpa auth, set `FIRECRAWL_ALLOW_EMPTY_KEY=true`. **Penting:** jalankan container Firecrawl tanpa akses ke jaringan internal Axtra (Supabase, backend). Firecrawl harus bisa keluar ke internet publik tetapi tidak boleh menjangkau `SUPABASE_URL`, backend, atau alamat privat/lokal — batasi lewat network policy/firewall agar URL yang di-crawl tidak bisa memaksa Firecrawl mengakses layanan internal.
-- **Lampiran dokumen (mode Document):** unggah TXT, MD, atau PDF (maks 10 MB, maks 10 dokumen per percakapan). Server menyimpan teks hasil ekstraksi di `chat_documents` (bukan file biner); isinya disuntik ke prompt sistem (dipotong `MAX_DOCUMENT_CHARS`). Dokumen terikat pada satu percakapan dan bisa dihapus kapan saja.
-- **Waktu respons:** penghitung naik saat balasan mengalir, lalu diganti label `Dimuat dalam X,X dtk` dari `done.elapsed_ms`.
-- **Pemakaian token:** tiap panggilan LLM (jawaban chat **dan** ekstraksi memori) mencatat token ke `token_usage_events`. Meter di navbar menampilkan token/menit (jendela bergulir 60 detik), dan panel di sidebar menampilkan token/menit + total harian dengan bilah progres. Total harian di-reset otomatis pukul 00:00 WIB (`Asia/Jakarta`). Endpoint `GET /api/usage` (bucket baca) mengembalikan nilai mentah; frontend polling tiap 15 detik dan memuat ulang tiap turn selesai lewat event `axtra:usage-changed`. `MODEL_TPM_LIMIT`/`MODEL_DAILY_TOKEN_LIMIT` jadi penyebut (set `0` untuk menyembunyikan persentase).
-- **Opsi jawaban interaktif:** jika permintaan ambigu, model mengakhiri balasan dengan blok ```` ```options ```` (JSON 2–4 opsi). Backend memisahkannya (tidak disimpan di konten, disimpan di `messages.metadata.options`), mengirimnya di `done.options`, dan frontend menampilkannya sebagai tombol yang mengirim opsi terpilih sebagai pesan berikutnya.
-- **Beranda:** `/` menampilkan menu semua fitur PRD (Chat — dengan sub-mode General, Curhat, Brainstorming, Document, Riset Web —, Memori, Profil, **Proyek**, **Cari Kerja** aktif; PRD dan Generated Image dengan label fase). Bisa dibuka lewat logo atau menu Beranda di sidebar.
-- **Memori personal:**
-  - Otomatis: dipicu setelah tiap jawaban, LLM mengekstrak fakta layak-ingat lalu disimpan dengan `source=chat` + `confidence`.
-  - Manual: tambah/koreksi/hapus dari halaman `/memory`.
-  - Retrieval: `match_memories_semantic` (pgvector) jika embedding tersedia, fallback `search_memories_keyword` (full-text).
-  - Rangkum topik serupa: di `/memory`, `GET /api/memories/clusters` mengelompokkan memori aktif bertopik sama (cluster kemiripan pgvector jika embedding tersedia, fallback pengelompokan LLM). `POST /api/memories/merge` merangkum memori terpilih jadi satu via LLM lalu **hard-delete** memori asal. Bisa otomatis per grup atau pilih manual (multi-checkbox).
-- **Profil:** identitas dasar (nama, zona waktu, gaya komunikasi) yang diberikan ke prompt sistem.
-- **Proyek (`/projects`):** daftar proyek dengan status (ide/aktif/jeda/selesai), deskripsi, tech stack, URL repo, dan catatan/keputusan teknis. Bisa ditambah **manual saja**; memori bertipe `project` dari percakapan tidak lagi membuat proyek baru, hanya menempelkan catatan ke proyek yang sudah ada (dicocokkan berdasarkan nama, atau ke proyek yang di-@mention di chat). Tata letak memakai lebar penuh: strip statistik (total/aktif/siap dianalisa/perlu perhatian) + grid kartu dua kolom. Untuk analisa repo GitHub: tombol **Index repo** menarik seluruh file repo publik via GitHub API (dipotong per-chunk, opsional di-embed). Progres indeks tampil sebagai progress bar + persentase (status `pending`/`indexing`, kolom `repo_index_progress`/`repo_index_stage`); daftar proyek di-polling senyap sehingga tidak reload/suspend saat indeks berjalan.
-- **Detail proyek (`/projects/[id]`):** halaman analisa per proyek dengan layout dua kolom (konten utama + sidebar kanan). Sidebar kanan berisi **Tanya repo** (RAG dengan sumber file yang bisa diklik) dan **riwayat pertanyaan tersimpan** di tabel `project_asks` — bertahan setelah reload, bisa dihapus per item atau dibersihkan. Panel tanya punya tombol **Perbesar/Kecilkan** yang menyembunyikan kolom detail sehingga chat memakai lebar penuh. Tiap bagian di kolom utama (Kesehatan, Tugas, Analisa repo, File ter-index) bisa dilipat (collapse) lewat judulnya. Kolom utama: overview & edit metadata, **Kesehatan proyek** (analisa AI: ringkasan, kekuatan, risiko, langkah berikutnya; disimpan di `projects.health_summary`/`health_generated_at`, bisa diperbarui), **Tugas** (papan Kanban per proyek di tabel `project_tasks`: kolom Todo/Doing/Selesai, kartu bisa ditarik antar kolom dan diurutkan ulang — status + `position` disimpan lewat endpoint reorder; prioritas low/medium/high), **Chat terkait** (daftar thread chat yang merujuk proyek ini), ringkasan analisa repo (Markdown + progress), dan **File explorer** (daftar file ter-index + isi chunk). Endpoint pendukung: `GET/PATCH/DELETE /api/projects/{id}`, `POST /api/projects/{id}/repo/index`, `POST /api/projects/{id}/repo/ask`, `GET/DELETE /api/projects/{id}/asks`, `POST /api/projects/{id}/health`, `GET/POST /api/projects/{id}/tasks`, `PATCH/DELETE /api/projects/{id}/tasks/{task_id}`, `POST /api/projects/{id}/tasks/reorder`, `GET /api/projects/{id}/conversations`, `GET /api/projects/{id}/files`, `GET /api/projects/{id}/files/content?path=`, `DELETE /api/projects/{id}/repo`.
-
-- **Vibe Coding (`/projects/[id]/vibe`):** alur kerja ide → discovery → spesifikasi → rencana → handoff → verifikasi, terhubung ke proyek yang sudah ada. Satu proyek bisa punya banyak workspace/ide. Halaman daftar membuat workspace dari ide mentah (ide, masalah, target pengguna, kendala — semua opsional kecuali minimal satu). Halaman workspace punya empat tab:
-  - **Discovery** — percakapan persisten. Tiap balasan model divalidasi sebagai JSON (`reply`, maks. 3 pertanyaan dengan opsi/rekomendasi, keputusan/asumsi). Keputusan disimpan terpisah dengan status `CONFIRMED`/`ASSUMED`/`RESEARCH`/`NEEDS_DECISION`/`VALIDATION_REQUIRED`; pengguna bisa menambah, mengubah status, atau menghapus. Mengubah status keputusan menandai dokumen approved/review menjadi `STALE`.
-  - **Dokumen** — tujuh artefak: `PRD`, `ARCHITECTURE`, `ACCEPTANCE_TEST_PLAN`, `UI_UX_SPEC`, `AGENT_INSTRUCTIONS`, `IMPLEMENTATION_PLAN`, `DEFINITION_OF_DONE`. Generate dari konteks proyek + discovery + keputusan; pratinjau Markdown atau edit; simpan selalu membuat versi baru. Regenerate/edit dokumen `APPROVED` tidak menimpa diam-diam: versi baru berstatus `NEEDS_REVIEW`, versi approved tetap di riwayat. Aksi Approve dan tandai Stale tersedia.
-  - **Rencana** — generate task dari spesifikasi yang tersedia (tidak wajib lengkap) dan masukkan ke `project_tasks` yang sama (`source='vibe'`) dengan key, goal, scope, modul, dependencies, acceptance criteria, testing, prioritas, dan metadata verifikasi. Tombol **Buat prompt** menyusun prompt salin-untuk coding agent dari task + artefak approved (fallback draft), berisi konteks proyek, requirement, security boundaries, dan format laporan penyelesaian. Axtra tidak menjalankan kode atau mengubah repo.
-  - **Verifikasi** — status `TODO`/`IN_PROGRESS`/`BLOCKED`/`NEEDS_REVIEW`/`DONE` + bukti (output test/log) + catatan kendala. `DONE` ditolak tanpa bukti. Status task board mengikuti (doing/done) agar tetap terlihat di halaman proyek.
-  Data disimpan di `vibe_sessions`, `vibe_messages`, `vibe_decisions`, `vibe_artifacts`, `vibe_artifact_versions`, plus kolom tambahan `project_tasks`. Semua endpoint berada di bawah `/api/projects/{project_id}/vibe` dan memakai session cookie + pemeriksaan kepemilikan proyek yang sama. Endpoint utama: `GET/POST /sessions`, `GET/PATCH/DELETE /sessions/{id}`, `GET/POST /sessions/{id}/messages`, `GET/POST/PATCH/DELETE /sessions/{id}/decisions`, `GET /sessions/{id}/artifacts`, `POST /sessions/{id}/artifacts/{kind}/generate`, `PUT /sessions/{id}/artifacts/{kind}`, `POST .../approve`, `POST .../stale`, `GET .../versions`, `GET /sessions/{id}/tasks`, `POST /sessions/{id}/tasks/generate`, `POST /sessions/{id}/tasks/{task_id}/prompt`, `PATCH /sessions/{id}/tasks/{task_id}/verification`.
-- **Cari Kerja (`/jobs`):** tracker lamaran kerja. Tanggal dibuat bisa diisi manual (default hari ini) dan deadline opsional (boleh dikosongkan). Daftar kartu + statistik (total, sedang diproses, interview, offer) dengan pencarian dan filter status (`draf`, `dilamar`, `screening`, `interview`, `offer`, `ditolak`, `ditarik`). Satu CV aktif per owner (`job_cv`) diunggah dari panel CV (TXT, MD, atau PDF; teks diekstrak, bukan file biner) dan dipakai untuk semua analisa. **Profil kandidat** menyimpan link LinkedIn + portfolio (owner-level, satu baris `job_cv`): portfolio bisa ditarik otomatis isinya (provider crawl, disimpan di `portfolio_content`), sedangkan LinkedIn tidak bisa di-crawl sehingga ringkasan teksnya bisa ditempel manual. **Analisa** punya pilihan sumber multiple-choice — CV, Portfolio, LinkedIn — dikirim sebagai `sources: ["cv","portfolio","linkedin"]`; hanya sumber terpilih yang masuk prompt, dan minimal satu harus tersedia. Detail lamaran (`/jobs/[id]`) memakai layout dua kolom: skor **match** dan **peluang berhasil** (0–100, estimasi AI), **deskripsi lowongan** (crawl URL rekrutmen via `web_crawler` atau isi manual), **prediksi jobdesk** + analisa kecocokan/peluang dalam Markdown, editor **cover letter** (generate AI, bisa diedit, salin, simpan; memakai CV), dan editor detail lamaran. Sidebar berisi CV, Profil kandidat (LinkedIn/portfolio), aksi cepat (crawl ulang, analisa, generate cover letter), dan info. Tabel `job_applications` + `job_cv` (migration `20260101000016_job_applications.sql`, `20260101000024_job_profile_links.sql`). Endpoint: `GET/POST /api/jobs`, `GET/PATCH/DELETE /api/jobs/{id}`, `POST /api/jobs/{id}/crawl`, `POST /api/jobs/{id}/analyze` (body `sources`), `POST /api/jobs/{id}/cover-letter`, `GET/POST/DELETE /api/jobs/cv`, `PUT /api/jobs/cv/links`, `POST /api/jobs/cv/portfolio/crawl`.
-- **Chat ↔ Proyek & Lamaran (@mention):** di kotak chat, ketik `@` untuk memilih proyek atau lamaran kerja (Cari Kerja). Konteks proyek terpilih (deskripsi, catatan, ringkasan repo, ringkasan AI, tugas terbuka) disuntikkan ke prompt sebagai data, sehingga jawaban bisa merujuk langsung ke proyek; rujukan tersimpan di `messages.metadata.project_refs`, dan thread ditautkan ke proyek lewat tabel `project_conversations` sehingga muncul di bagian **Chat terkait** pada halaman detail proyek. Lamaran yang dirujuk juga membawa konteksnya (posisi, perusahaan, status, skor match/peluang, prediksi jobdesk, analisa, deskripsi lowongan, cover letter) dan disimpan di `messages.metadata.job_refs`.
-
-- **Data proyek (non-repo):** selain repo, tiap proyek bisa punya data bebas di luar kode lewat tabel `project_documents` — catatan/teks yang ditempel (spesifikasi, notulen, keputusan) atau unggahan `.txt`/`.md`, serta tautan penting (`kind` `note`/`link`). Kelola di bagian **Data proyek (non-repo)** pada halaman detail (tambah/edit/hapus). Data ini diikutkan ke ringkasan AI dan ke konteks `@mention` di chat, jadi AI tahu hal-hal di luar repo. Endpoint: `GET/POST /api/projects/{id}/documents`, `PATCH/DELETE /api/projects/{id}/documents/{doc_id}`.
-
-- **Ringkasan AI otomatis:** setiap perubahan data proyek (edit metadata, tambah/ubah/hapus tugas, tambah/ubah/hapus data non-repo, selesai index repo, hapus repo) menandai `projects.health_stale = true` lalu menjadwalkan regenerasi ringkasan di background setelah jeda singkat (`PROJECT_HEALTH_DEBOUNCE_SECONDS`, default 12 dtk) sehingga rentetan perubahan hanya memicu satu panggilan LLM. Halaman detail menampilkan badge "memperbarui ringkasan..." dan polling sampai ringkasan baru tersimpan. Tombol **Analisa/Perbarui** tetap tersedia untuk regenerasi manual. Setel `PROJECT_HEALTH_AUTO_REFRESH=false` untuk mematikan refresh otomatis. Retrieval memakai `match_code_chunks_semantic` (bila embedding aktif) atau `search_code_chunks_keyword` yang mencocokkan token pertanyaan dengan OR + fallback substring, sehingga pertanyaan bahasa alami tetap menemukan chunk walaupun kode repo berbahasa Inggris. Batas file/ukuran/chunk via `REPO_INDEX_*`; `GITHUB_TOKEN` opsional untuk repo privat atau rate limit lebih tinggi.
-- **Design system:** mengikuti `Design.md` — black-first (light mode opsional), palet netral tanpa aksen/glow/shadow dekoratif, token CSS terpusat, system font, ikon Lucide, sidebar 224px collapsible + drawer mobile, markdown + copy kode, tombol stop streaming, empty state 4 prompt, reduced-motion, focus-visible, dan label ARIA.
-- **Keamanan:** semua query lewat service-role client backend; RLS aktif tanpa policy (anon ditolak); cookie HttpOnly + SameSite=Lax, `Secure` saat production; rate limit chat/tulis per owner dan rate limit login per IP; error tidak leaking detail internal.
-  - Rate limit baca (sidebar, riwayat, daftar dokumen, profil, memori) punya kuota terpisah dan jauh lebih besar, jadi menjelajah riwayat tidak memakan kuota chat.
-  - Catatan: siapa pun yang tahu `APP_PASSWORD` bisa mengakses seluruh data. Gunakan kata sandi kuat dan jangan bagikan.
-- **PWA:** manifest + service worker shell; siap untuk push notification Phase 4.
-- **Free-tier:** model fallback Groq; embedding provider opsional; rate limit diaktifkan.
-
-## Verifikasi End-to-End
-
-Setelah backend berjalan di port 8000 dan `.env` terisi:
+Linux/macOS:
 
 ```bash
 cd backend
-.venv\Scripts\python scripts\e2e_test.py
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-Script ini: login dengan `APP_PASSWORD` → cek `/api/auth/status` & `/api/profile` → kirim chat (SSE) → verifikasi pesan tersimpan, memori terekstraksi, dan retrieval bekerja → hapus data uji → logout. Semua asersi harus `ALL E2E CHECKS PASSED`.
+Verifikasi:
 
-## Testing dan Pemeriksaan
+```bash
+curl http://localhost:8000/api/health
+```
 
-Backend (unit test memakai Supabase in-memory dan LLM palsu, tanpa jaringan):
+Dokumentasi OpenAPI tersedia di `/docs` saat `APP_ENV` bukan `production`.
+
+### 4. Frontend
+
+```bash
+cd frontend
+cp .env.example .env.local
+npm install
+npm run dev
+```
+
+Buka `http://localhost:3000`.
+
+Jika `NEXT_PUBLIC_API_PROXY=1`, browser memanggil backend lewat rewrite `/api-proxy` pada origin yang sama sehingga cookie sesi `SameSite=Lax` ikut terkirim.
+
+## Environment variables
+
+### Aplikasi dan auth
+
+| Variable | Default | Fungsi |
+|---|---|---|
+| `APP_ENV` | `development` | `production` mematikan `/docs` dan mengaktifkan cookie `Secure` |
+| `APP_NAME` | `Axtra API` | Judul OpenAPI |
+| `CORS_ORIGINS` | `http://localhost:3000` | Origin frontend yang diizinkan |
+| `APP_PASSWORD` | — | Satu kata sandi login |
+| `SESSION_SECRET` | — | Menandatangani cookie sesi |
+| `OWNER_USER_ID` | `00000000-0000-0000-0000-000000000001` | UUID owner tunggal |
+| `SESSION_TTL_HOURS` | `720` | Umur cookie sesi |
+
+### Supabase dan migrasi
+
+| Variable | Fungsi |
+|---|---|
+| `SUPABASE_URL` | URL project |
+| `SUPABASE_ANON_KEY` | Kunci anon; tidak dipakai browser |
+| `SUPABASE_SERVICE_ROLE_KEY` | Akses data backend; jangan pernah ke browser |
+| `SUPABASE_PROJECT_REF` | Project ref untuk Management API |
+| `SUPABASE_DB_URL` | Connection string untuk `migrate.ps1` |
+| `SUPABASE_ACCESS_TOKEN` | Token untuk `migrate_api.py` |
+
+### LLM multi-provider
+
+| Variable | Default | Fungsi |
+|---|---|---|
+| `LLM_PROVIDER` | `groq` | Provider default bila preferensi user kosong |
+| `LLM_MODEL` | kosong | Model default opsional |
+| `GROQ_API_KEY` | — | Kunci Groq |
+| `GROQ_BASE_URL` | `https://api.groq.com/openai/v1` | Base URL Groq |
+| `GROQ_CHAT_MODELS` | `openai/gpt-oss-120b,openai/gpt-oss-20b` | Daftar fallback model Groq |
+| `APP_ENCRYPTION_KEY` | fallback `SESSION_SECRET` | Enkripsi API key user di database |
+| `OPENAI_API_KEY` | — | Kunci OpenAI |
+| `OPENROUTER_API_KEY` | — | Kunci OpenRouter |
+| `GEMINI_API_KEY` | — | Kunci Google Gemini |
+| `CLOUDFLARE_API_KEY` | — | Kunci Cloudflare Workers AI |
+| `CLOUDFLARE_ACCOUNT_ID` | — | Account ID untuk base URL Workers AI |
+| `CLOUDFLARE_BASE_URL` | — | Override penuh base URL Workers AI |
+| `PROVIDER_MODELS_CACHE_SECONDS` | `120` | Cache katalog model live |
+| `PROVIDER_PING_TIMEOUT` | `12` | Timeout cek koneksi provider |
+
+Env contoh juga memuat slot `TOGETHER_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`, dan `CEREBRAS_API_KEY`. Katalog bawaan saat ini berisi Groq, OpenRouter, OpenAI, Google Gemini, dan Cloudflare Workers AI; endpoint lain dapat ditambahkan sebagai **provider custom** dari UI.
+
+### Image generation
+
+| Variable | Default | Fungsi |
+|---|---|---|
+| `IMAGE_PROVIDER` | `openrouter` | Provider gambar default |
+| `IMAGE_MODEL` | `google/gemini-3-pro-image` | Model gambar default |
+| `IMAGE_TIMEOUT` | `120` | Timeout request gambar |
+| `IMAGE_MAX_RETRIES` | `2` | Retry untuk 429/5xx |
+| `IMAGE_DAILY_LIMIT` | `100` | Batas gambar per hari; `0` tanpa batas |
+
+### Embedding dan memori
+
+| Variable | Default | Fungsi |
+|---|---|---|
+| `EMBEDDING_PROVIDER` | `none` | `none` atau `huggingface` |
+| `EMBEDDING_MODEL` | `sentence-transformers/all-MiniLM-L6-v2` | Model embedding |
+| `EMBEDDING_DIM` | `384` | Harus sama dengan dimensi kolom |
+| `HUGGINGFACE_API_KEY` | — | Kunci Hugging Face |
+| `MEMORY_RETRIEVAL_COUNT` | `6` | Jumlah memori per jawaban |
+| `MEMORY_MIN_SIMILARITY` | `0.25` | Ambang kemiripan semantik |
+| `MEMORY_CLUSTER_SIMILARITY` | `0.82` | Ambang cluster topik |
+| `MEMORY_EXTRACTION_ENABLED` | `true` | Ekstraksi memori otomatis |
+| `MEMORY_SCOPE_BY_MODE` | `false` | Batasi retrieval ke mode chat yang sama |
+
+### Guardrail
+
+| Variable | Default | Fungsi |
+|---|---|---|
+| `MAX_CONTEXT_MESSAGES` | `20` | Pesan terakhir yang dikirim ke LLM |
+| `RATE_LIMIT_PER_MINUTE` | `30` | Batas aksi tulis/LLM |
+| `READ_RATE_LIMIT_PER_MINUTE` | `300` | Batas baca |
+| `MAX_UPLOAD_BYTES` | `10485760` | Maks ukuran unggahan |
+| `MAX_DOCUMENT_CHARS` | `12000` | Maks karakter dokumen dalam prompt |
+
+### Riset, crawl, dan skill
+
+| Variable | Default | Fungsi |
+|---|---|---|
+| `RESEARCH_MAX_CHARS` | `12000` | Maks karakter sumber web dalam prompt |
+| `RESEARCH_MAX_SOURCES` | `5` | Maks sumber per percakapan |
+| `RESEARCH_FETCH_TIMEOUT` | `15` | Timeout crawl parser bawaan |
+| `RESEARCH_MAX_BYTES` | `2097152` | Maks byte HTML |
+| `RESEARCH_SEARCH_LIMIT` | `5` | Hasil per pencarian Firecrawl |
+| `SKILL_MAX_CHARS` | `6000` | Maks konten satu skill |
+| `SKILLS_MAX_TOTAL_CHARS` | `12000` | Maks total skill per prompt |
+| `SKILLS_MAX_PER_FEATURE` | `6` | Maks skill per fitur |
+| `CRAWL_PROVIDER` | `httpx` | `httpx` atau `firecrawl` |
+| `FIRECRAWL_API_KEY` | — | Kunci Firecrawl, hanya server |
+| `FIRECRAWL_BASE_URL` | `https://api.firecrawl.dev` | Base URL Firecrawl/self-host |
+| `FIRECRAWL_ALLOW_EMPTY_KEY` | `false` | Hanya untuk self-host tanpa auth |
+| `FIRECRAWL_TIMEOUT_MS` | `60000` | Timeout scrape |
+| `FIRECRAWL_DAILY_CREDITS` | `30` | Batas kredit harian |
+| `FIRECRAWL_MONTHLY_CREDITS` | `1000` | Batas kredit bulanan |
+| `FIRECRAWL_CHECK_PROMPT_INJECTION` | `false` | Scan prompt-injection bawaan Firecrawl |
+
+### Repo, proyek, dan usage
+
+| Variable | Default | Fungsi |
+|---|---|---|
+| `GITHUB_TOKEN` | — | Repo privat + rate limit lebih tinggi |
+| `GITHUB_API_BASE` | `https://api.github.com` | API GitHub |
+| `GITHUB_RAW_BASE` | `https://raw.githubusercontent.com` | Pembacaan file mentah |
+| `REPO_INDEX_MAX_FILES` | `300` | Maks file repo |
+| `REPO_INDEX_MAX_FILE_BYTES` | `200000` | Maks byte per file |
+| `REPO_INDEX_MAX_CHUNKS` | `4000` | Maks chunk |
+| `REPO_INDEX_CHUNK_CHARS` | `1200` | Ukuran chunk |
+| `REPO_INDEX_CHUNK_OVERLAP` | `200` | Overlap chunk |
+| `REPO_QA_CONTEXT_CHUNKS` | `8` | Chunk konteks untuk Tanya repo |
+| `PROJECT_HEALTH_AUTO_REFRESH` | `true` | Regenerasi ringkasan AI otomatis |
+| `PROJECT_HEALTH_DEBOUNCE_SECONDS` | `12` | Jeda debounce regenerasi |
+| `MODEL_TPM_LIMIT` | `8000` | Denominator meter token/menit; `0` sembunyikan |
+| `MODEL_DAILY_TOKEN_LIMIT` | `200000` | Denominator meter token/hari; `0` sembunyikan |
+| `TELEGRAM_BOT_TOKEN` | — | Disiapkan untuk Phase 4; belum dipakai |
+
+### Frontend
+
+| Variable | Default | Fungsi |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `http://localhost:8000` | Base URL backend |
+| `NEXT_PUBLIC_API_PROXY` | — | `1` untuk memakai rewrite `/api-proxy` |
+
+## Perilaku fitur
+
+### Auth dan shell
+
+- Login memakai satu kata sandi. Cookie `axtra_session` bersifat HttpOnly, `SameSite=Lax`, dan `Secure` saat production.
+- Middleware hanya memeriksa keberadaan cookie; validitas sesi diverifikasi backend.
+- Shell desktop memakai sidebar 224px yang dapat diciutkan ke 56px, drawer di mobile, topbar ringkas, meter penggunaan, toggle tema, dan footer.
+- Sidebar berisi pencarian menu, daftar fitur yang dapat diurutkan/disembunyikan/di-rename, folder mode Chat, meter token, dan menu akun.
+
+### Beranda orchestrator
+
+- `/` bukan dashboard statis. Composer menerima tujuan bahasa alami lalu memanggil `POST /api/orchestrator`.
+- Aksi yang diizinkan: `navigate`, `new_conversation`, `focus_menu`, `menu_order`, `menu_visibility`, `menu_rename`, `reset_menu`, `set_theme`, dan `save_memory`.
+- Route divalidasi di backend; model tidak boleh mengarang halaman atau ID menu.
+- Konfigurasi menu disimpan di `localStorage`; orchestrator dapat mengubah urutan, visibilitas, dan label.
+- `AssistantDigest` menampilkan sapaan dan 3–4 rekomendasi dari riwayat, memori, dan profil. Hasil di-cache di browser dan bisa diperbarui manual.
+- Jika LLM gagal, orchestrator dan digest memakai fallback yang aman.
+
+### Chat
+
+- Route: `/chat` menampilkan pemilih mode; `/chat/[mode]` membuka chat baru; `/chat/[id]` membuka percakapan tersimpan.
+- Lima mode: `general`, `curhat`, `brainstorming`, `document`, `research`. Setiap mode punya prompt, saran, riwayat, dan slash command sendiri; memori personal dibagi lintas mode.
+- Multi-tab chat horizontal dengan indikator streaming dan tombol buka/tutup tab.
+- Streaming SSE: event `meta`, `token`, `memory`, `warning`, `done`, `error`; `done` dikirim setelah jawaban tersimpan dan membawa `elapsed_ms` serta opsi jawaban.
+- Tombol stop membatalkan generasi yang sedang berjalan.
+- Opsi jawaban interaktif disimpan di `messages.metadata.options` dan ditampilkan sebagai tombol.
+- Composer mendukung lampiran dokumen, slash command, `@mention` proyek/lamaran, crawl URL, dan pencarian web pada mode Riset.
+- Persona per mode menyimpan multi-role, perilaku, dan catatan bebas di `profiles.preferences.chat_modes`.
+- Slash command disimpan per turn di `messages.metadata.command`.
+
+### Memori
+
+- Ekstraksi otomatis setelah jawaban; fakta disimpan dengan tipe, sumber, timestamp, dan confidence.
+- CRUD manual di `/memory`, filter tipe, pencarian, cluster topik serupa, dan merge.
+- Retrieval memakai pgvector jika embedding tersedia; fallback full-text keyword.
+- Sumber web dapat disimpan menjadi memori lewat `POST /api/research/sources/{id}/memory`.
+- Memori dapat dipakai orchestrator untuk memahami intent.
+
+### Skills dan pengaturan
+
+- Skill adalah entitas Markdown terpisah dengan `slug`, `name`, `description`, `category`, `version`, `source`, `license`, dan `status`.
+- Assignment many-to-many ke fitur melalui `feature_skills`.
+- Import manual atau tempel `SKILL.md` (frontmatter YAML subset + body Markdown).
+- Hanya skill `active` dan ter-assign yang dimuat ke prompt; `draft` tidak bisa di-assign dan `disabled` tidak dimuat.
+- Blok prompt: GLOBAL → ROLE → SKILL AKTIF → INSTRUCTION → KONTEKS. Konten skill tidak dieksekusi.
+- Halaman `/settings` memakai rail vertikal dan lebar penuh dengan tab:
+  - **Model teks** — provider, API key, koneksi, kuota, rekomendasi, katalog model teks.
+  - **Model gambar** — provider gambar, katalog model gambar, style default, info Image API.
+  - **Chat & fitur** — persona per fitur, provider crawl, katalog command, dan pengelolaan skill.
+  - **Skills** — pustaka skill.
+  - **Slash command** — daftar command per mode.
+- Model teks dan model gambar disimpan terpisah (`preferences.llm` dan `preferences.llm_image`).
+
+### Riset Web dan dokumen
+
+- Mode Riset punya input crawl URL dan pencarian web.
+- Pencarian memakai Firecrawl `/v2/search`; crawl memakai parser `httpx` atau Firecrawl `/v2/scrape`.
+- Sumber disimpan sebagai teks per percakapan, dibatasi `RESEARCH_MAX_SOURCES`, dan disuntik ke prompt.
+- Firecrawl fallback ke parser bawaan saat kredit habis, rate limit, timeout, atau error jaringan; kunci tidak valid tidak di-fallback.
+- Kredit Firecrawl dicatat di `crawl_usage_events`.
+- Mode Document menerima TXT, MD, dan PDF; teks disimpan di `chat_documents`, bukan file biner.
+- Konten web/dokumen diperlakukan sebagai data tidak tepercaya.
+
+### Proyek
+
+- `/projects` menampilkan statistik dan grid kartu proyek: status, deskripsi, tech stack, label, repo, progres indeks, dan kesehatan.
+- Proyek dapat dibuat manual; memori bertipe project hanya menempelkan catatan ke proyek yang cocok atau di-`@mention`.
+- Index repo mengambil file dari GitHub API/raw, memecah chunk, opsional embedding, dan menyimpan progres.
+- Detail proyek memakai dua kolom: ringkasan, metadata, kesehatan AI + riwayat, papan tugas Kanban, chat terkait, file explorer, data non-repo, dan sidebar Tanya repo + riwayat pertanyaan.
+- Perubahan data proyek menandai `health_stale`; scheduler background melakukan regenerasi setelah debounce.
+- Tanya repo memakai retrieval semantik atau keyword dengan fallback substring.
+- Prompt `@mention` membawa konteks proyek dan lamaran; tautan chat disimpan di `project_conversations` dan `messages.metadata`.
+
+### Vibe Coding
+
+- `/vibe` dan `/projects/[id]/vibe` mengelola workspace ide per proyek.
+- Empat tab: Discovery, Dokumen, Rencana, Verifikasi.
+- Discovery menyimpan pesan terstruktur dan keputusan dengan status `CONFIRMED`, `ASSUMED`, `RESEARCH`, `NEEDS_DECISION`, `VALIDATION_REQUIRED`.
+- Tujuh artefak: `PRD`, `ARCHITECTURE`, `ACCEPTANCE_TEST_PLAN`, `UI_UX_SPEC`, `AGENT_INSTRUCTIONS`, `IMPLEMENTATION_PLAN`, `DEFINITION_OF_DONE`.
+- Setiap simpan/generate membuat versi immutable. Edit artefak `APPROVED` menghasilkan `NEEDS_REVIEW`; keputusan berubah menandai `STALE`.
+- Task masuk ke `project_tasks` yang sama dengan `source='vibe'`.
+- Prompt handoff disusun deterministik dari task + artefak approved (fallback draft).
+- Verifikasi `DONE` mensyaratkan bukti. Axtra tidak menjalankan terminal, commit, push, deploy, atau GitHub write.
+
+### Cari Kerja
+
+- `/jobs` adalah tracker lamaran dengan status `draf`, `dilamar`, `screening`, `interview`, `offer`, `ditolak`, `ditarik`.
+- Satu CV aktif per owner (`job_cv`) dari TXT, MD, atau PDF.
+- Profil kandidat menyimpan LinkedIn dan portfolio; portfolio dapat dicrawl, LinkedIn diisi manual.
+- Analisa memilih sumber `cv`, `portfolio`, `linkedin`; minimal satu tersedia.
+- Detail lamaran: skor match, peluang berhasil, deskripsi lowongan, prediksi jobdesk, analisa, editor cover letter, dan aksi crawl/analisa ulang.
+- `@mention` lamaran menyuntikkan konteks ke chat.
+
+### Generated Image
+
+- `/images` membuat gambar dari prompt teks, gambar referensi, style, rasio, resolusi, kualitas, format, background, seed, steps, jumlah gambar, dan routing provider.
+- Model gambar aktif dan style default disimpan di preferensi terpisah dari model teks.
+- Katalog model diambil live dari Image API; parameter yang tidak didukung model disembunyikan.
+- Streaming pratinjau dipakai bila model mendukung.
+- Riwayat sesi menyimpan hasil di state browser; telemetri biaya/jumlah gambar tersimpan di `image_usage_events`.
+- Batas harian `IMAGE_DAILY_LIMIT` ditegakkan server. OpenRouter dengan saldo rendah menampilkan peringatan.
+- Provider gambar bawaan: OpenRouter-style Image API dan Cloudflare Workers AI (termasuk model fallback terkurasi).
+
+### Pemakaian token
+
+- Setiap panggilan LLM mencatat token ke `token_usage_events` dengan model dan sumber (`chat` atau `memory`).
+- Meter menampilkan token/menit, total harian WIB, dan rincian per model.
+- Frontend polling tiap 15 detik dan memuat ulang setelah turn selesai.
+- `MODEL_TPM_LIMIT` dan `MODEL_DAILY_TOKEN_LIMIT` hanya denominator tampilan; `0` menyembunyikan persentase.
+
+## API utama
+
+Semua endpoint memakai prefix `/api` dan cookie sesi kecuali health/login.
+
+| Kelompok | Endpoint |
+|---|---|
+| Health/auth | `GET /health`, `GET /auth/status`, `POST /auth/login`, `POST /auth/logout` |
+| Profil | `GET/PATCH /profile` |
+| Chat | `POST /chat` (SSE) |
+| Percakapan | `GET /conversations`, `GET /conversations/{id}`, `GET /conversations/{id}/messages`, `PATCH/DELETE /conversations/{id}` |
+| Dokumen | `POST/GET /documents`, `DELETE /documents/{id}` |
+| Memori | `GET/POST /memories`, `GET /memories/search`, `GET/PATCH/DELETE /memories/{id}`, `GET /memories/clusters`, `POST /memories/merge` |
+| Chat settings | `GET/PUT /chat-settings`, `PUT /chat-settings/crawl` |
+| Feature settings | `GET /feature-settings`, `PUT /feature-settings/{feature}` |
+| Skills | `GET/POST /skills`, `GET/PATCH/DELETE /skills/{id}`, `POST /skills/parse` |
+| Provider | `GET/POST /providers`, `PUT /providers/selection`, `PUT /providers/image-selection`, `PUT/DELETE /providers/{id}/key`, `GET /providers/{id}/models`, `POST /providers/{id}/ping`, `GET /providers/{id}/recommendations`, `GET /providers/{id}/quota` |
+| Research | `POST /research/crawl`, `POST /research/search`, `GET /research/sources`, `DELETE /research/sources/{id}`, `POST /research/sources/{id}/memory` |
+| Proyek | CRUD `/projects`, index/hapus repo, tanya repo + stream, riwayat ask, health, tasks + reorder, dokumen, file explorer, chat terkait |
+| Vibe | `/projects/{project_id}/vibe/sessions`, messages, decisions, artifacts, versions, tasks generate/prompt, verification |
+| Jobs | CRUD `/jobs`, CV, links, crawl portfolio, crawl lowongan, analyze, cover-letter |
+| Images | `GET /images/config`, `/images/models`, `/images/endpoints`, `/images/credits`, `/images/usage`; `PUT /images/style`; `POST /images/generate`, `/images/generate/stream` |
+| Usage | `GET /usage` |
+| Orchestrator | `POST /orchestrator` |
+| Rekomendasi | `GET /recommendations` |
+
+## Database dan migration
+
+Migration saat ini:
+
+| File | Isi |
+|---|---|
+| `0001_init` | profiles, conversations, messages, memories, memory_embeddings |
+| `0002_rls` | RLS awal |
+| `0003_functions` | retrieval semantik + keyword |
+| `0004_single_user` | owner tunggal, lepas FK auth |
+| `0005_retrieval_single_user` | retrieval untuk service role |
+| `0006_chat_modes_documents` | mode chat + chat_documents |
+| `0007_token_usage` | token_usage_events + agregat |
+| `0008_projects` | projects |
+| `0009_project_code` | chunk kode + RPC |
+| `0010_repo_index_progress` | progres indeks |
+| `0011_project_tasks_asks` | tasks, asks, health |
+| `0012_code_keyword_or` | keyword retrieval OR |
+| `0013_project_chat_links` | health stale + project_conversations |
+| `0014_project_documents` | data non-repo |
+| `0015_research_sources` | research_sources |
+| `0016_job_applications` | job_applications + job_cv |
+| `0017_code_files_rpc` | daftar file repo |
+| `0018_crawl_usage` | crawl_usage_events |
+| `0019_vibe_workspace` | vibe_sessions, messages, decisions, artifacts, versions |
+| `0020_project_labels` | labels JSONB |
+| `0021_project_health_history` | health_history JSONB |
+| `0022_feature_skills` | tabel skills awal |
+| `0023_skill_system` | metadata skill + feature_skills |
+| `0024_job_profile_links` | LinkedIn/portfolio |
+| `0025_job_profile_seed` | seed profil kandidat |
+| `0026_provider_settings` | provider_keys terenkripsi |
+| `0027_token_usage_by_model` | rincian token per model |
+| `0028_image_usage` | image_usage_events |
+
+## Testing dan verifikasi
+
+Backend:
 
 ```bash
 cd backend
@@ -223,24 +500,87 @@ npm run typecheck
 npm run build
 ```
 
-Test Vibe Coding ada di `backend/tests/test_vibe_service.py` dan mencakup: pembuatan/persistensi session, riwayat discovery + keputusan, penolakan output model malformed, versi artefak + approval + stale, generasi task tanpa duplikasi key, penyusunan prompt, verifikasi berbasis bukti, kegagalan provider LLM, serta penolakan akses lintas proyek/session.
+E2E manual/otomatis:
 
-## MVP limitations Vibe Coding
+```bash
+cd backend
+.venv\Scripts\python scripts\e2e_test.py
+```
 
-- Prompt implementasi **disusun deterministik** dari task + artefak (tanpa panggilan LLM tambahan), supaya handoff tidak gagal karena provider.
-- Tidak ada eksekusi terminal, pengeditan kode otonom, commit/push, deployment, atau GitHub write. Bukti verifikasi diisi manual oleh pengguna dari coding agent eksternal.
-- Discovery dan generate artefak/task memakai provider/model LLM yang sudah dikonfigurasi (`GROQ_*`); tidak ada model, key, atau endpoint baru.
-- Tidak ada tabel/UI review kolaboratif multi-user (aplikasi tetap single-owner sesuai model auth saat ini).
+Cakupan test backend mencakup provider Cloudflare, provider registry, code indexer, crawl provider, Firecrawl search, feature persona, image router/service, job service, skill parser/service, vibe service, dan web crawler.
 
-Catatan model: Groq mengganti katalog model dari waktu ke waktu. Cek yang aktif dengan `GET https://api.groq.com/openai/v1/models` lalu sesuaikan `GROQ_CHAT_MODELS`.
+## Deploy ke Vercel
 
-## Peta per Phase (referensi)
+Frontend dan backend di-deploy sebagai **dua project Vercel** dari repo yang sama:
+frontend memakai preset Next.js, backend memakai preset FastAPI (Python runtime,
+Fluid compute). Streaming SSE didukung runtime Python Vercel.
+
+### 1. Project backend (FastAPI)
+
+- Import repo yang sama, set **Root Directory = `backend`**.
+- Vercel mendeteksi `app/main.py` (instance `app`) secara zero-config.
+- `backend/vercel.json` mengatur `maxDuration: 300` dan mengecualikan `tests/`,
+  `scripts/`, `__pycache__`, `.venv` dari bundle.
+- `backend/.python-version` = `3.12`.
+- Environment variables wajib:
+
+  | Variable | Nilai |
+  |---|---|
+  | `APP_ENV` | `production` |
+  | `APP_PASSWORD` | kata sandi login (kuat) |
+  | `SESSION_SECRET` | string acak panjang |
+  | `APP_ENCRYPTION_KEY` | string acak panjang (stabil; jangan diubah setelah ada key tersimpan) |
+  | `SUPABASE_URL` | URL project |
+  | `SUPABASE_SERVICE_ROLE_KEY` | service role key |
+  | `CORS_ORIGINS` | `https://<frontend-domain>` |
+  | `GROQ_API_KEY` atau kunci provider lain | opsional tapi disarankan |
+
+- Catat URL hasil deploy, mis. `https://axtra-backend.vercel.app`.
+
+### 2. Project frontend (Next.js)
+
+- Import repo yang sama, set **Root Directory = `frontend`**.
+- Environment variables (diisi sebelum build):
+
+  | Variable | Nilai |
+  |---|---|
+  | `NEXT_PUBLIC_API_URL` | URL project backend, mis. `https://axtra-backend.vercel.app` |
+  | `NEXT_PUBLIC_API_PROXY` | `1` |
+
+`NEXT_PUBLIC_API_PROXY=1` membuat browser memanggil backend lewat rewrite
+same-origin `/api-proxy`, sehingga cookie sesi `SameSite=Lax` terkirim otomatis
+dan tidak ada masalah CORS. `NEXT_PUBLIC_API_URL` dibaca saat build untuk
+menentukan tujuan rewrite, jadi harus diisi di Vercel (bukan hanya lokal).
+
+### Batasan saat per-request (Vercel)
+
+- Rate limiter dan `health_scheduler` berjalan **in-process**; pada Fluid compute
+  beberapa instance dapat hidup bersamaan, sehingga batas rate bersifat
+  per-instance dan auto-refresh kesehatan proyek bersifat best-effort (tugas
+  setelah respons tidak dijamin selesai). Untuk jadwal yang andal, gunakan
+  Vercel Cron memanggil route API.
+- Endpoint `/docs` dimatikan saat `APP_ENV=production`.
+
+## Batasan saat ini
+
+- Aplikasi masih **single-owner**, bukan multi-tenant.
+- Belum ada daily journal, goal tracking, AI mentor, laporan harian/mingguan.
+- Belum ada automation engine, scheduler persisten, retry queue, Telegram, atau web push.
+- GitHub integration masih read-only untuk indexing repo; belum ada OAuth, commit, issue, atau PR write.
+- Vibe Coding tidak mengeksekusi kode dan tidak mengubah repo.
+- Generated Image bergantung pada kredit/provider eksternal; tidak ada model gambar gratis yang dijamin.
+- Riwayat gambar disimpan di state sesi browser, bukan tabel riwayat gambar penuh.
+- Firecrawl self-host harus diisolasi dari jaringan internal agar tidak bisa mengakses Supabase/backend.
+- Siapa pun yang mengetahui `APP_PASSWORD` dapat mengakses seluruh data. Gunakan kata sandi kuat.
+
+## Peta phase
 
 | Phase | Isi | Status |
 |---|---|---|
-| 1 | Chat + streaming + memori + profil | ✅ selesai |
-| 2 | Daily journal, target, proyek | 🟡 proyek + analisa repo selesai; journal/target belum |
-| 3 | AI Mentor (skill, laporan) | ⏳ |
-| 4 | Automation + Telegram/PWA push | ⏳ |
-| 5 | GitHub + PRD | 🟡 Vibe Coding MVP selesai; GitHub read-only belum |
-| 6 | Generated Image | ⏳ |
+| 1 | Chat, streaming, memori, profil, auth | ✅ selesai |
+| 2 | Journal, target, proyek | 🟡 proyek, task, dokumen, repo, health selesai; journal/target belum |
+| 3 | AI Mentor, skill evidence, laporan | ⏳ belum |
+| 4 | Automation, Telegram, PWA push | ⏳ belum |
+| 5 | GitHub + Vibe Coding | 🟡 Vibe Coding MVP selesai; GitHub write/OAuth belum |
+| 6 | Riset web, creator tools, image | 🟡 Riset Web + Generated Image selesai; creator content tools belum |
+| Lintas fase | Multi-provider, settings model teks/gambar, orchestrator beranda | ✅ selesai |

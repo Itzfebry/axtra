@@ -243,7 +243,7 @@ export function SkillManager({
           </button>
         </div>
       </header>
-      <p className="mt-1 max-w-2xl text-[12px] text-muted">
+      <p className="mt-1 text-[12px] text-muted">
         Skill adalah konten Markdown dengan metadata. Skill aktif yang
         di-assign ke fitur akan dimuat ke prompt. Konten hanya teks dan tidak
         dieksekusi.
@@ -271,14 +271,16 @@ export function SkillManager({
         />
       )}
 
-      <ul className="mt-3 overflow-hidden rounded-lg border border-border bg-surface">
+      <ul className="mt-3 grid gap-2 md:grid-cols-2 2xl:grid-cols-3">
         {visible.length === 0 && (
-          <li className="px-4 py-3 text-[12px] text-muted">Belum ada skill.</li>
+          <li className="rounded-lg border border-border bg-surface px-4 py-3 text-[12px] text-muted">
+            Belum ada skill.
+          </li>
         )}
-        {visible.map((skill, index) => (
+        {visible.map((skill) => (
           <li
             key={skill.id}
-            className={index > 0 ? "border-t border-border" : ""}
+            className="rounded-lg border border-border bg-surface"
           >
             <div className="flex items-start gap-3 px-4 py-3">
               <div className="min-w-0 flex-1">

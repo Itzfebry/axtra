@@ -69,6 +69,23 @@ def test_build_payload_omits_empty_and_maps_refs() -> None:
     assert "output_format" not in payload
 
 
+def test_apply_image_style_appends_fragment_and_defaults() -> None:
+    styled = image_service.apply_image_style("kucing di sofa", "anime")
+    assert styled.startswith("kucing di sofa,")
+    assert "anime style" in styled
+    assert image_service.apply_image_style("prompt", "unknown") == "prompt"
+    assert image_service.apply_image_style("prompt", "none") == "prompt"
+
+
+def test_image_style_options_and_entry() -> None:
+    options = image_service.image_style_options()
+    assert options[0] == {"id": "none", "label": "Tanpa style"}
+    assert image_service.image_style_entry("bogus") == {
+        "id": "none",
+        "label": "Tanpa style",
+    }
+
+
 def test_build_payload_includes_provider_routing() -> None:
     routing = image_service.build_provider_routing(
         only=["google-ai-studio"], sort="price", allow_fallbacks=False

@@ -432,11 +432,22 @@ class ImageModelsOut(BaseModel):
     models: list[ImageModelOut] = Field(default_factory=list)
 
 
+class ImageStyleOut(BaseModel):
+    id: str
+    label: str = ""
+
+
+class ImageStyleUpdate(BaseModel):
+    style: str = Field(default="none", max_length=40)
+
+
 class ImageConfigOut(BaseModel):
     provider: str
     provider_label: str
     model: str
     key_ok: bool = False
+    style: str = "none"
+    styles: list[ImageStyleOut] = Field(default_factory=list)
     aspect_ratios: list[str] = Field(default_factory=list)
     resolutions: list[str] = Field(default_factory=list)
     qualities: list[str] = Field(default_factory=list)
@@ -455,6 +466,7 @@ class ImageGenerateRequest(BaseModel):
     quality: str = Field(default="", max_length=10)
     output_format: str = Field(default="", max_length=10)
     background: str = Field(default="", max_length=12)
+    style: str = Field(default="", max_length=40)
     output_compression: int | None = Field(default=None, ge=0, le=100)
     seed: int | None = Field(default=None, ge=0)
     # Cloudflare Workers AI diffusion steps (ignored by other providers).

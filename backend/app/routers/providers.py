@@ -89,7 +89,11 @@ async def _save_image_pref(
     client: Any, user_id: str, *, provider: str, model: str
 ) -> None:
     preferences = await _load_preferences(client, user_id)
-    preferences["llm_image"] = {"provider": provider, "model": model}
+    current = preferences.get("llm_image")
+    payload: dict[str, str] = {"provider": provider, "model": model}
+    if isinstance(current, dict) and current.get("style"):
+        payload["style"] = str(current["style"])
+    preferences["llm_image"] = payload
     await client.table("profiles").update({"preferences": preferences}).eq(
         "id", user_id
     ).execute()

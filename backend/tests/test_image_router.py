@@ -50,6 +50,8 @@ def test_config_returns_defaults(patched_httpx) -> None:
     assert config.max_n == 10
     assert config.daily_limit == 100
     assert "1:1" in config.aspect_ratios
+    assert config.style == "none"
+    assert any(item.id == "anime" for item in config.styles)
 
 
 def test_models_include_capabilities(patched_httpx) -> None:

@@ -136,6 +136,7 @@ export default function ImagesPage() {
   const [quality, setQuality] = useState("auto");
   const [outputFormat, setOutputFormat] = useState("png");
   const [background, setBackground] = useState("auto");
+  const [style, setStyle] = useState("none");
   const [seed, setSeed] = useState("");
   const [steps, setSteps] = useState("");
   const [count, setCount] = useState(1);
@@ -178,6 +179,7 @@ export default function ImagesPage() {
       .then((data) => {
         setConfig(data);
         setModel(data.model);
+        setStyle(data.style || "none");
         setCount(1);
       })
       .catch((err) =>
@@ -312,6 +314,7 @@ export default function ImagesPage() {
       quality: qualityValue,
       output_format: formatValue,
       background: backgroundValue,
+      style,
       input_references: refsAllowed
         ? references.map((ref) => ref.dataUrl)
         : [],
@@ -594,6 +597,25 @@ export default function ImagesPage() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
+              {config && config.styles.length > 0 && (
+                <div>
+                  <label htmlFor="image-style" className="block text-[12px] text-muted">
+                    Style
+                  </label>
+                  <select
+                    id="image-style"
+                    value={style}
+                    onChange={(event) => setStyle(event.target.value)}
+                    className={`mt-1 ${inputClass}`}
+                  >
+                    {config.styles.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {formatOptions.length > 0 && (
                 <div>
                   <label htmlFor="image-format" className="block text-[12px] text-muted">

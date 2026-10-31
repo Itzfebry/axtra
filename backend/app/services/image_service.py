@@ -43,6 +43,87 @@ _RETRY_STATUS = {429, 500, 502, 503, 504}
 _MODEL_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _MODEL_CACHE_TTL = 300.0
 
+# Style presets append a prompt fragment so results stay consistent without the
+# user retyping descriptors. The id is what gets stored in preferences.
+IMAGE_STYLES: tuple[dict[str, str], ...] = (
+    {"id": "none", "label": "Tanpa style", "prompt": ""},
+    {
+        "id": "photorealistic",
+        "label": "Fotorealistis",
+        "prompt": "photorealistic, ultra detailed, natural lighting, 50mm photograph",
+    },
+    {
+        "id": "cinematic",
+        "label": "Sinematik",
+        "prompt": "cinematic lighting, film still, dramatic composition, shallow depth of field",
+    },
+    {
+        "id": "anime",
+        "label": "Anime",
+        "prompt": "anime style, cel shaded, vibrant colors, clean line art",
+    },
+    {
+        "id": "3d",
+        "label": "3D Render",
+        "prompt": "3D render, octane render, soft studio lighting, high detail",
+    },
+    {
+        "id": "watercolor",
+        "label": "Cat air",
+        "prompt": "watercolor painting, soft washes, textured paper",
+    },
+    {
+        "id": "oil",
+        "label": "Lukisan minyak",
+        "prompt": "oil painting, visible brush strokes, rich texture",
+    },
+    {
+        "id": "illustration",
+        "label": "Ilustrasi digital",
+        "prompt": "digital illustration, clean line art, flat colors",
+    },
+    {
+        "id": "pixel",
+        "label": "Pixel art",
+        "prompt": "pixel art, 8-bit, crisp edges, limited palette",
+    },
+    {
+        "id": "minimal",
+        "label": "Minimalis",
+        "prompt": "minimalist, clean composition, simple background, flat design",
+    },
+)
+_DEFAULT_IMAGE_STYLE = "none"
+_STYLE_PROMPTS = {item["id"]: item["prompt"] for item in IMAGE_STYLES}
+
+
+def image_style_options() -> list[dict[str, str]]:
+    """Return the selectable style presets (id + label only)."""
+    return [{"id": item["id"], "label": item["label"]} for item in IMAGE_STYLES]
+
+
+def normalize_image_style(style: str) -> str:
+    """Coerce an unknown/empty style to the default preset."""
+    value = (style or "").strip()
+    return value if value in _STYLE_PROMPTS else _DEFAULT_IMAGE_STYLE
+
+
+def image_style_entry(style: str) -> dict[str, str]:
+    value = normalize_image_style(style)
+    for item in IMAGE_STYLES:
+        if item["id"] == value:
+            return {"id": item["id"], "label": item["label"]}
+    return {"id": _DEFAULT_IMAGE_STYLE, "label": ""}
+
+
+def apply_image_style(prompt: str, style: str) -> str:
+    """Append the preset's prompt fragment to a user prompt (best-effort)."""
+    fragment = _STYLE_PROMPTS.get(normalize_image_style(style), "")
+    text = (prompt or "").strip()
+    if not fragment:
+        return text
+    return f"{text}, {fragment}"
+
 
 class ImageGenerationError(RuntimeError):
     """Raised when an image request fails before/at the provider."""
@@ -52,8 +133,8 @@ class ImageGenerationError(RuntimeError):
         self.status_code = status_code
 
 
-async def load_image_preference(client: Any, user_id: str) -> tuple[str, str]:
-    """Return ``(provider_id, model)`` for image generation, or blanks."""
+async def load_image_preference(client: Any, user_id: str) -> tuple[str, str, str]:
+    """Return ``(provider_id, model, style)`` for image generation, or blanks."""
     response = (
         await client.table("profiles")
         .select("preferences")
@@ -69,8 +150,32 @@ async def load_image_preference(client: Any, user_id: str) -> tuple[str, str]:
             return (
                 str(value.get("provider") or "").strip(),
                 str(value.get("model") or "").strip(),
+                normalize_image_style(str(value.get("style") or "")),
             )
-    return "", ""
+    return "", "", _DEFAULT_IMAGE_STYLE
+
+
+async def save_image_style(client: Any, user_id: str, style: str) -> str:
+    """Persist the default style inside ``profiles.preferences['llm_image']``."""
+    value = normalize_image_style(style)
+    response = (
+        await client.table("profiles")
+        .select("preferences")
+        .eq("id", user_id)
+        .maybe_single()
+        .execute()
+    )
+    row = (response.data if response else None) or {}
+    preferences = row.get("preferences")
+    preferences = preferences if isinstance(preferences, dict) else {}
+    current = preferences.get("llm_image")
+    current = dict(current) if isinstance(current, dict) else {}
+    current["style"] = value
+    preferences = {**preferences, "llm_image": current}
+    await client.table("profiles").update({"preferences": preferences}).eq(
+        "id", user_id
+    ).execute()
+    return value
 
 
 def _images_url(settings: Settings, spec: ProviderSpec) -> str:
@@ -253,7 +358,7 @@ def _parse_model(item: dict[str, Any]) -> dict[str, Any] | None:
 async def _resolve_target(
     settings: Settings, client: Any, user_id: str, provider: str, model: str
 ) -> tuple[ProviderSpec, str, str]:
-    provider_id, stored_model = await load_image_preference(client, user_id)
+    provider_id, stored_model, _ = await load_image_preference(client, user_id)
     provider_id = (provider or provider_id or settings.image_provider or "openrouter").strip()
     model = (model or stored_model or settings.image_model or "").strip()
     spec = await resolve_provider_spec(settings, client, user_id, provider_id)
@@ -431,7 +536,7 @@ async def get_credits(
     settings: Settings, client: Any, user_id: str, provider: str = ""
 ) -> dict[str, Any]:
     """Read the provider account balance. Normal keys cannot read this."""
-    provider_id, _ = await load_image_preference(client, user_id)
+    provider_id, _, _ = await load_image_preference(client, user_id)
     provider_id = (provider or provider_id or settings.image_provider or "openrouter").strip()
     spec = await resolve_provider_spec(settings, client, user_id, provider_id)
     if spec is None:
@@ -783,6 +888,7 @@ async def _generate_cloudflare(
     model: str,
     prompt: str,
     *,
+    style: str = "",
     seed: int | None = None,
     steps: int | None = None,
 ) -> dict[str, Any]:
@@ -792,6 +898,7 @@ async def _generate_cloudflare(
     model family) -> ``{"result": {"image": "<base64>"}}`` or raw image bytes.
     """
     prompt = await _translate_prompt(settings, client, user_id, prompt)
+    prompt = apply_image_style(prompt, style)
     payload: dict[str, Any] = {"prompt": prompt}
     if seed is not None:
         payload["seed"] = seed
@@ -833,6 +940,7 @@ async def generate_image(
     output_compression: int | None = None,
     seed: int | None = None,
     steps: int | None = None,
+    style: str = "",
     input_references: list[str] | None = None,
     provider_routing: dict[str, Any] | None = None,
     n: int = 1,
@@ -851,10 +959,12 @@ async def generate_image(
             api_key,
             model,
             prompt,
+            style=style,
             seed=seed,
             steps=steps,
         )
 
+    prompt = apply_image_style(prompt, style)
     payload = _build_payload(
         model,
         prompt,
@@ -915,6 +1025,7 @@ async def stream_image(
     background: str = "",
     seed: int | None = None,
     steps: int | None = None,
+    style: str = "",
     input_references: list[str] | None = None,
     provider_routing: dict[str, Any] | None = None,
     n: int = 1,
@@ -946,6 +1057,7 @@ async def stream_image(
                 api_key,
                 model,
                 prompt,
+                style=style,
                 seed=seed,
                 steps=steps,
             )
@@ -957,7 +1069,7 @@ async def stream_image(
 
     payload = _build_payload(
         model,
-        prompt,
+        apply_image_style(prompt, style),
         aspect_ratio=aspect_ratio,
         resolution=resolution,
         quality=quality,

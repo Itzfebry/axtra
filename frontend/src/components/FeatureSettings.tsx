@@ -149,7 +149,7 @@ export function FeatureSettings() {
         <SlidersHorizontal size={16} aria-hidden className="text-muted" />
         <h2 className="text-sm font-medium">Peran, skill &amp; instruksi per fitur</h2>
       </header>
-      <p className="mt-1 max-w-2xl text-[12px] text-muted">
+      <p className="mt-1 text-[12px] text-muted">
         Isi peran lewat field teks, pilih skill terstruktur, dan tambahkan
         instruksi per fitur. Perubahan berlaku pada balasan berikutnya.
       </p>
@@ -171,11 +171,14 @@ export function FeatureSettings() {
 
       {data?.crawl && <CrawlCard data={data} saving={savingCrawl} onSave={handleSaveCrawl} />}
 
-      <div className="mt-4 space-y-6">
+      <div className="mt-4 grid items-start gap-5 xl:grid-cols-2">
         {groups.map((group) => (
           <div key={group.name}>
-            <h3 className="text-[11px] uppercase tracking-wide text-muted">
+            <h3 className="flex items-center justify-between gap-2 text-[11px] uppercase tracking-wide text-muted">
               {group.name}
+              <span className="font-normal normal-case tracking-normal">
+                {group.features.length} fitur
+              </span>
             </h3>
             <ul className="mt-2 overflow-hidden rounded-lg border border-border bg-surface">
               {group.features.map((entry, index) => (
@@ -245,7 +248,7 @@ function CrawlCard({
           </span>
         )}
       </div>
-      <p className="mt-1 max-w-2xl text-[12px] text-muted">
+      <p className="mt-1 text-[12px] text-muted">
         Dipakai untuk Riset Web dan crawl lowongan. Parser bawaan gratis dan
         privat; Firecrawl menangani halaman berat JavaScript. Kunci hanya di
         server.

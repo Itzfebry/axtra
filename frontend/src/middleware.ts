@@ -6,6 +6,10 @@ const PROTECTED = [
   "/memory",
   "/profile",
   "/settings",
+  "/projects",
+  "/jobs",
+  "/images",
+  "/vibe",
   "/journal",
   "/goals",
 ];
