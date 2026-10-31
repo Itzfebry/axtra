@@ -62,10 +62,10 @@ CLOUDFLARE_TEXT_MODELS: tuple[str, ...] = (
     "@cf/deepseek-ai/deepseek-r1-distill-qwen-32b",
 )
 
-# Curated Workers AI text-to-image models. These are called through the account
-# ``/ai/run/<model>`` route (not the OpenAI image surface), so they only take
-# ``prompt`` plus an optional seed/steps. FLUX.2 models are omitted because they
-# require multipart form input.
+# Curated Workers AI image models. These are called through the account
+# ``/ai/run/<model>`` route (not the OpenAI image surface). FLUX.2 models use
+# multipart form input and additionally accept up to four reference images
+# (image-to-image / multi-reference editing).
 CLOUDFLARE_IMAGE_MODELS: tuple[str, ...] = (
     "@cf/black-forest-labs/flux-1-schnell",
     "@cf/stabilityai/stable-diffusion-xl-base-1.0",
@@ -73,6 +73,9 @@ CLOUDFLARE_IMAGE_MODELS: tuple[str, ...] = (
     "@cf/lykon/dreamshaper-8-lcm",
     "@cf/leonardo/lucid-origin",
     "@cf/leonardo/phoenix-1.0",
+    "@cf/black-forest-labs/flux-2-klein-4b",
+    "@cf/black-forest-labs/flux-2-klein-9b",
+    "@cf/black-forest-labs/flux-2-dev",
 )
 
 PROVIDERS: tuple[ProviderSpec, ...] = (

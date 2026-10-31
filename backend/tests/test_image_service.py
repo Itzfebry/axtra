@@ -297,8 +297,16 @@ def test_list_image_models_cloudflare_is_curated() -> None:
     )
     ids = [model["id"] for model in models]
     assert "@cf/black-forest-labs/flux-1-schnell" in ids
-    assert all("steps" in model["capabilities"] for model in models)
+    assert "@cf/black-forest-labs/flux-2-klein-4b" in ids
     assert all("seed" in model["capabilities"] for model in models)
+    by_id = {model["id"]: model for model in models}
+    # klein builds run a fixed 4-step process, so ``steps`` is hidden for them.
+    assert "steps" not in by_id["@cf/black-forest-labs/flux-2-klein-4b"]["capabilities"]
+    assert "steps" in by_id["@cf/black-forest-labs/flux-2-dev"]["capabilities"]
+    for model_id in image_service.CLOUDFLARE_FLUX2_MODELS:
+        caps = by_id[model_id]["capabilities"]
+        assert caps["input_references"]["max"] == 4
+        assert "image" in by_id[model_id]["input_modalities"]
 
 
 def test_fetch_image_endpoints_cloudflare_empty() -> None:

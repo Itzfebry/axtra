@@ -224,21 +224,54 @@ _CLOUDFLARE_IMAGE_CAPABILITIES: dict[str, Any] = {
     "steps": {"type": "range", "min": 1, "max": 20},
 }
 
+# FLUX.2 models take multipart form input and support reference images. The
+# two klein builds run a fixed 4-step process, so ``steps`` is not exposed.
+CLOUDFLARE_FLUX2_MODELS: frozenset[str] = frozenset(
+    {
+        "@cf/black-forest-labs/flux-2-klein-4b",
+        "@cf/black-forest-labs/flux-2-klein-9b",
+        "@cf/black-forest-labs/flux-2-dev",
+    }
+)
+CLOUDFLARE_FLUX2_FIXED_STEPS: frozenset[str] = frozenset(
+    {
+        "@cf/black-forest-labs/flux-2-klein-4b",
+        "@cf/black-forest-labs/flux-2-klein-9b",
+    }
+)
+_FLUX2_MAX_REFERENCES = 4
+
+
+def _is_flux2(model: str) -> bool:
+    return (model or "").strip() in CLOUDFLARE_FLUX2_MODELS
+
 
 def _fallback_image_models(spec: ProviderSpec) -> list[dict[str, Any]]:
     """Curated image models for a provider with no ``/images/models`` listing."""
-    capabilities = dict(_CLOUDFLARE_IMAGE_CAPABILITIES)
-    return [
-        {
-            "id": model_id,
-            "name": model_id,
-            "capabilities": dict(capabilities),
-            "supports_streaming": False,
-            "input_modalities": ["text"],
-            "output_modalities": ["image"],
-        }
-        for model_id in spec.fallback_image_models
-    ]
+    models: list[dict[str, Any]] = []
+    for model_id in spec.fallback_image_models:
+        if _is_flux2(model_id):
+            capabilities: dict[str, Any] = {
+                "seed": {"type": "boolean"},
+                "input_references": {"type": "range", "min": 0, "max": _FLUX2_MAX_REFERENCES},
+            }
+            if model_id not in CLOUDFLARE_FLUX2_FIXED_STEPS:
+                capabilities["steps"] = {"type": "range", "min": 1, "max": 50}
+            input_modalities = ["text", "image"]
+        else:
+            capabilities = dict(_CLOUDFLARE_IMAGE_CAPABILITIES)
+            input_modalities = ["text"]
+        models.append(
+            {
+                "id": model_id,
+                "name": model_id,
+                "capabilities": capabilities,
+                "supports_streaming": False,
+                "input_modalities": input_modalities,
+                "output_modalities": ["image"],
+            }
+        )
+    return models
 
 
 def _cloudflare_results(response: httpx.Response, model: str) -> list[dict[str, str]]:
@@ -264,8 +297,20 @@ def _cloudflare_results(response: httpx.Response, model: str) -> list[dict[str, 
             b64 = result
     if not b64:
         return []
-    media_type = _cloudflare_media_type(model)
+    media_type = _sniff_image_media_type(b64) or _cloudflare_media_type(model)
     return [{"data_url": f"data:{media_type};base64,{b64}", "media_type": media_type}]
+
+
+def _sniff_image_media_type(b64: str) -> str:
+    """Detect the image type from a base64 header (PNG/JPEG/WebP)."""
+    head = (b64 or "")[:16]
+    if head.startswith("iVBOR"):
+        return "image/png"
+    if head.startswith("/9j/"):
+        return "image/jpeg"
+    if head.startswith("UklGR"):
+        return "image/webp"
+    return ""
 
 
 def _provider_detail(response: httpx.Response) -> str:
@@ -777,6 +822,62 @@ async def _post(
     raise ImageGenerationError(f"Tidak bisa menghubungi provider: {last_exc}")
 
 
+async def _post_multipart(
+    http: httpx.AsyncClient,
+    url: str,
+    headers: dict[str, str],
+    data: dict[str, str],
+    files: list[tuple[str, tuple[str, bytes, str]]],
+    retries: int,
+) -> httpx.Response:
+    """POST multipart form data with the same bounded retry as ``_post``."""
+    last_exc: httpx.HTTPError | None = None
+    for attempt in range(max(retries, 0) + 1):
+        try:
+            response = await http.post(url, headers=headers, data=data, files=files)
+        except httpx.HTTPError as exc:  # transport error
+            last_exc = exc
+            if attempt < retries:
+                await asyncio.sleep(0.8 * (attempt + 1))
+                continue
+            raise ImageGenerationError(f"Tidak bisa menghubungi provider: {exc}") from exc
+        if response.status_code in _RETRY_STATUS and attempt < retries:
+            await asyncio.sleep(0.8 * (attempt + 1))
+            continue
+        return response
+    raise ImageGenerationError(f"Tidak bisa menghubungi provider: {last_exc}")
+
+
+_DATA_URL_RE = re.compile(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$", re.DOTALL)
+
+
+async def _reference_part(
+    http: httpx.AsyncClient, ref: str
+) -> tuple[str, bytes, str]:
+    """Turn a data URL or HTTP(S) URL into an httpx multipart file triple."""
+    match = _DATA_URL_RE.match((ref or "").strip())
+    if match:
+        media_type, b64 = match.group(1), match.group(2)
+        try:
+            raw = base64.b64decode(b64)
+        except (ValueError, TypeError) as exc:
+            raise ImageGenerationError("Gambar referensi tidak valid.") from exc
+        ext = media_type.split("/")[-1] or "png"
+        return (f"reference.{ext}", raw, media_type)
+    url = (ref or "").strip()
+    if not url.startswith(("http://", "https://")):
+        raise ImageGenerationError("Gambar referensi harus berupa data URL atau URL HTTP.")
+    try:
+        response = await http.get(url)
+    except httpx.HTTPError as exc:
+        raise ImageGenerationError(f"Gagal mengunduh gambar referensi: {exc}") from exc
+    if response.status_code >= 400:
+        raise ImageGenerationError("Gagal mengunduh gambar referensi.")
+    media_type = str(response.headers.get("content-type") or "image/png").split(";")[0]
+    ext = media_type.split("/")[-1] or "png"
+    return (f"reference.{ext}", response.content, media_type)
+
+
 # ---------------------------------------------------------------------------
 # Prompt translation (Workers AI diffusion models are English-only)
 # ---------------------------------------------------------------------------
@@ -891,25 +992,47 @@ async def _generate_cloudflare(
     style: str = "",
     seed: int | None = None,
     steps: int | None = None,
+    input_references: list[str] | None = None,
 ) -> dict[str, Any]:
     """Generate via the Workers AI ``/ai/run/<model>`` route.
 
-    Contract: body ``{prompt, seed?, steps?}`` (the steps field is named per
-    model family) -> ``{"result": {"image": "<base64>"}}`` or raw image bytes.
+    Plain models take a JSON body ``{prompt, seed?, steps?}``. FLUX.2 models
+    require multipart form data and accept up to four ``input_image_N``
+    reference images (image-to-image / multi-reference editing).
     """
     prompt = await _translate_prompt(settings, client, user_id, prompt)
     prompt = apply_image_style(prompt, style)
-    payload: dict[str, Any] = {"prompt": prompt}
-    if seed is not None:
-        payload["seed"] = seed
-    if steps is not None:
-        payload[_cloudflare_steps_key(model)] = steps
-
     url = _cloudflare_run_url(settings, spec, model)
-    async with httpx.AsyncClient(timeout=settings.image_timeout) as http:
-        response = await _post(
-            http, url, _headers(api_key), payload, settings.image_max_retries
-        )
+
+    if _is_flux2(model):
+        refs = [ref for ref in (input_references or []) if ref][:_FLUX2_MAX_REFERENCES]
+        data: dict[str, str] = {"prompt": prompt}
+        if seed is not None:
+            data["seed"] = str(seed)
+        if steps is not None and model not in CLOUDFLARE_FLUX2_FIXED_STEPS:
+            data["steps"] = str(steps)
+        async with httpx.AsyncClient(timeout=settings.image_timeout) as http:
+            files: list[tuple[str, tuple[str, bytes, str]]] = []
+            for index, ref in enumerate(refs):
+                files.append((f"input_image_{index}", await _reference_part(http, ref)))
+            response = await _post_multipart(
+                http,
+                url,
+                {"Authorization": f"Bearer {api_key}"},
+                data,
+                files,
+                settings.image_max_retries,
+            )
+    else:
+        payload: dict[str, Any] = {"prompt": prompt}
+        if seed is not None:
+            payload["seed"] = seed
+        if steps is not None:
+            payload[_cloudflare_steps_key(model)] = steps
+        async with httpx.AsyncClient(timeout=settings.image_timeout) as http:
+            response = await _post(
+                http, url, _headers(api_key), payload, settings.image_max_retries
+            )
 
     if response.status_code >= 400:
         raise ImageGenerationError(
@@ -962,6 +1085,7 @@ async def generate_image(
             style=style,
             seed=seed,
             steps=steps,
+            input_references=input_references,
         )
 
     prompt = apply_image_style(prompt, style)
@@ -1060,6 +1184,7 @@ async def stream_image(
                 style=style,
                 seed=seed,
                 steps=steps,
+                input_references=input_references,
             )
         except ImageGenerationError as exc:
             yield {"type": "error", "detail": str(exc), "status": exc.status_code}
