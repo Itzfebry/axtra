@@ -31,8 +31,10 @@ from app.routers import (
     profile,
     projects,
     providers,
+    push,
     recommendations,
     research,
+    schedules,
     skills,
     telegram,
     usage,
@@ -124,6 +126,8 @@ def create_app() -> FastAPI:
     app.include_router(images.router)
     app.include_router(journal.router)
     app.include_router(telegram.router)
+    app.include_router(schedules.router)
+    app.include_router(push.router)
     app.include_router(cron.router)
 
     @app.exception_handler(Exception)

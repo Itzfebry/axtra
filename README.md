@@ -3,7 +3,7 @@
 Personal AI agent yang memahami pengguna secara berkelanjutan melalui memori, membantu pengembangan diri, proyek, pencarian kerja, dan produksi visual dalam satu ruang kerja.
 
 > **Status dokumen:** kondisi implementasi per 31 Oktober 2026.
-> **Fase aktif:** Phase 1 selesai; Phase 2 dan Phase 5 sebagian besar selesai; Riset Web dan Generated Image sudah berjalan; automation, Telegram/push, journal, target, dan AI Mentor belum.
+> **Fase aktif:** Phase 1 selesai; Phase 2 dan Phase 5 sebagian besar selesai; Riset Web dan Generated Image sudah berjalan; automation, Telegram, journal, target, dan jadwal/push PWA sudah ada; AI Mentor belum.
 
 ## Ringkasan fitur saat ini
 
@@ -21,9 +21,10 @@ Personal AI agent yang memahami pengguna secara berkelanjutan melalui memori, me
 | Cari Kerja | ✅ | Tracker lamaran, CV, profil LinkedIn/portfolio, crawl lowongan, match score, cover letter |
 | Generated Image | ✅ | Model gambar terpisah, katalog model, referensi gambar, style, rasio/resolusi, streaming, riwayat sesi, kuota harian |
 | Beranda orchestrator | ✅ | Perintah bahasa alami untuk membuka tool, mengatur menu, tema, atau menyimpan memori |
-| PWA | 🟡 | Manifest + service worker shell; push notification belum |
+| PWA | ✅ | Manifest + service worker shell + Web Push (VAPID) untuk notifikasi jadwal |
 | Jurnal & target | ✅ | Jurnal harian + target minimal (DB + API; dipakai web dan Telegram) |
-| Automation / Telegram | 🟡 | Bot Telegram (webhook + polling), laporan harian/mingguan, retry outbox, cron fan-out; PWA push belum |
+| Jadwal / pengingat | ✅ | Pengingat sekali waktu + timer; notifikasi Telegram & PWA; snooze/selesai/edit/batal |
+| Automation / Telegram | 🟡 | Bot Telegram (webhook + polling), laporan harian/mingguan, retry outbox, cron fan-out, dispatch per menit |
 | GitHub OAuth read/write | ⏳ | Saat ini hanya indexing repo publik/privat lewat token env |
 
 ## Arsitektur
@@ -61,7 +62,7 @@ axtra/
 │   ├── setup-env.ps1          # turunkan backend/.env + frontend/.env.local dari root .env
 │   ├── migrate.ps1            # migrasi via psql / Supabase DB URL
 │   └── migrate_api.py         # migrasi via Supabase Management API
-├── supabase/migrations/       # 28 migration berurutan
+├── supabase/migrations/       # 31 migration berurutan
 ├── backend/
 │   ├── requirements.txt
 │   ├── tests/                 # 13 file test
@@ -309,11 +310,14 @@ Env contoh juga memuat slot `TOGETHER_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API
 | `TELEGRAM_WEBHOOK_SECRET` | — | Dikirim Telegram di header `X-Telegram-Bot-Api-Secret-Token` |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | — | Allowlist chat id, dipisah koma; kosong = hanya chat yang sudah tertaut |
 | `TELEGRAM_DEFAULT_MODE` | `general` | Mode chat default bot |
-| `CRON_SECRET` | — | Bearer secret untuk `/api/cron/tick` (Vercel Cron mengirim otomatis) |
+| `CRON_SECRET` | — | Bearer secret untuk `/api/cron/tick` dan `/api/cron/minutely` |
 | `AUTOMATION_DAILY_REPORT_HOUR` | `21` | Jam laporan harian (WIB) |
 | `AUTOMATION_WEEKLY_REPORT_HOUR` | `20` | Jam review mingguan, hari Minggu (WIB) |
 | `AUTOMATION_QUIET_START` | `22` | Awal jam tenang (WIB) |
 | `AUTOMATION_QUIET_END` | `7` | Akhir jam tenang (WIB) |
+| `VAPID_PUBLIC_KEY` | — | Public key VAPID (base64url) untuk Web Push |
+| `VAPID_PRIVATE_KEY` | — | Private key VAPID (PEM; newline boleh ditulis `\n`) |
+| `VAPID_SUBJECT` | `mailto:…` | Contact `mailto:`/`https:` untuk klaim VAPID |
 
 ### Frontend
 
@@ -334,7 +338,8 @@ Env contoh juga memuat slot `TOGETHER_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API
 ### Beranda orchestrator
 
 - `/` bukan dashboard statis. Composer menerima tujuan bahasa alami lalu memanggil `POST /api/orchestrator`.
-- Aksi yang diizinkan: `navigate`, `new_conversation`, `focus_menu`, `menu_order`, `menu_visibility`, `menu_rename`, `reset_menu`, `set_theme`, dan `save_memory`.
+- Aksi yang diizinkan: `navigate`, `new_conversation`, `focus_menu`, `menu_order`, `menu_visibility`, `menu_rename`, `reset_menu`, `set_theme`, `save_memory`, dan `create_schedule`.
+- `create_schedule` membuat pengingat dari bahasa alami (`title`, `note`, `due_at` ISO atau `due_in_minutes`); waktu sekarang WIB disuntik ke prompt agar LLM bisa menghitung.
 - Route divalidasi di backend; model tidak boleh mengarang halaman atau ID menu.
 - Konfigurasi menu disimpan di `localStorage`; orchestrator dapat mengubah urutan, visibilitas, dan label.
 - `AssistantDigest` menampilkan sapaan dan 3–4 rekomendasi dari riwayat, memori, dan profil. Hasil di-cache di browser dan bisa diperbarui manual.
@@ -394,8 +399,17 @@ Env contoh juga memuat slot `TOGETHER_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API
 - Bot Telegram single-owner. Hanya chat id di `TELEGRAM_ALLOWED_CHAT_IDS` atau yang sudah tertaut di `telegram_links` yang dilayani; pesan lain ditolak.
 - Webhook `POST /api/telegram/webhook` divalidasi dari header `X-Telegram-Bot-Api-Secret-Token` (dibandingkan constant-time). `update_id` dideduplikasi di `telegram_updates`.
 - Dev lokal pakai long-polling: `backend/scripts/telegram_poll.py` (opsi `--drop-webhook`) memanggil dispatcher yang sama.
-- Pesan keluar memakai `parse_mode=HTML`; teks dinamis di-escape (`escape_html`) dan dipecah pada batas 4096 karakter.
+- Pesan keluar memakai `parse_mode=HTML`; jawaban LLM (Markdown) dikonversi ke HTML Telegram (`markdown_to_telegram_html`), teks dinamis di-escape, dan pesan dipecah pada batas 4096 karakter dengan tag HTML tetap seimbang.
 - Notifikasi proaktif masuk `notification_outbox` lalu dikirim oleh cron dengan backoff bertingkat (1, 5, 15, 60, 240 menit), maksimum 5 percobaan; baris permanen gagal ditandai `failed`.
+
+### Jadwal / pengingat dan Web Push
+
+- Pengingat sekali waktu dan timer disimpan di `schedules` (`kind` = `once`|`timer`, `due_at`, `status` = `active`|`done`|`cancelled`, `channels`). Akses web lewat `/jadwal` dan `/api/schedules`; bot lewat `/jadwal` dan `/timer`.
+- Tombol inline notifikasi Telegram: `sch:done:<id>`, `sch:snooze:<menit>:<id>`, `sch:cancel:<id>`. Web punya aksi snooze (5/10/30), selesai, edit, batal, hapus.
+- `GET|POST /api/cron/minutely` mengklaim baris `active` yang `due_at <= now` (update bersyarat agar idempoten), lalu mengirim ke Telegram (via outbox) dan/atau Web Push, kemudian menguras outbox.
+- Web Push memakai VAPID (`pywebpush`), langganan disimpan di `push_subscriptions` (endpoint unik). Endpoint yang dibalas 404/410 dihapus otomatis. Service worker `public/sw.js` menangani `push` + `notificationclick`.
+- **Cron per menit tidak tersedia di Vercel Hobby.** Jadwalkan layanan eksternal (mis. cron-job.org atau GitHub Actions) untuk memanggil `GET https://<backend>/api/cron/minutely` setiap menit dengan header `Authorization: Bearer $CRON_SECRET`. Vercel Cron harian tetap menjalankan `/api/cron/tick` untuk laporan.
+- Timer menampilkan hitung mundur per detik di browser; pengiriman notifikasi tetap bergantung pada cron per menit (presisi menit).
 
 ### Proyek
 
@@ -472,9 +486,11 @@ Semua endpoint memakai prefix `/api` dan cookie sesi kecuali health/login.
 | Jurnal | `GET/POST /journal`, `PATCH/DELETE /journal/{id}` |
 | Target | `GET/POST /goals`, `PATCH/DELETE /goals/{id}` |
 | Telegram | `POST /telegram/webhook` (publik, secret header), `GET /telegram/status`, `GET /telegram/links`, `PATCH /telegram/settings`, `POST /telegram/test`, `POST /telegram/set-webhook`, `POST /telegram/register`, `POST /telegram/outbox/flush`, `POST /telegram/maintenance/purge` |
-| Cron | `GET/POST /cron/tick` (Bearer `CRON_SECRET`) |
+| Jadwal | `GET/POST /schedules`, `PATCH/DELETE /schedules/{id}`, `POST /schedules/{id}/snooze`, `/complete`, `/cancel` |
+| Push | `GET /push/config`, `POST /push/subscribe`, `POST /push/unsubscribe`, `POST /push/test` |
+| Cron | `GET/POST /cron/tick`, `GET/POST /cron/minutely` (Bearer `CRON_SECRET`) |
 
-Kekecualian auth: `/telegram/webhook` dilindungi secret header Telegram, dan `/cron/tick` dilindungi `Authorization: Bearer $CRON_SECRET`.
+Kekecualian auth: `/telegram/webhook` dilindungi secret header Telegram, dan `/cron/tick` + `/cron/minutely` dilindungi `Authorization: Bearer $CRON_SECRET`.
 
 ## Database dan migration
 
@@ -512,6 +528,7 @@ Migration saat ini:
 | `0028_image_usage` | image_usage_events |
 | `0029_automation_telegram` | telegram_links, telegram_updates, notification_outbox, automation_runs |
 | `0030_journal_goals` | journal_entries, goals |
+| `0031_schedules_push` | schedules, push_subscriptions |
 
 ## Testing dan verifikasi
 
@@ -570,8 +587,13 @@ Fluid compute). Streaming SSE didukung runtime Python Vercel.
   | `TELEGRAM_BOT_TOKEN` | token bot |
   | `TELEGRAM_WEBHOOK_SECRET` | string acak; dikirim Telegram di header |
   | `TELEGRAM_ALLOWED_CHAT_IDS` | chat id yang diizinkan (opsional) |
+  | `VAPID_PUBLIC_KEY` | public key VAPID (base64url) untuk Web Push |
+  | `VAPID_PRIVATE_KEY` | private key VAPID (PEM, newline sebagai `\n`) |
+  | `VAPID_SUBJECT` | `mailto:…` atau `https://…` untuk klaim VAPID |
 
 - `backend/vercel.json` juga mendaftarkan Cron harian `0 14 * * *` ke `/api/cron/tick` (21:00 WIB).
+- Untuk notifikasi jadwal, buat cron eksternal per menit ke `GET /api/cron/minutely` dengan header `Authorization: Bearer $CRON_SECRET` (cron-job.org: interval 1 menit; GitHub Actions: `schedule: - cron: "* * * * *"` ditambah `curl`).
+- Generate VAPID: `python -c "from py_vapid import Vapid; ..."` atau `npx web-push generate-vapid-keys`.
 
 - Setelah deploy, daftarkan webhook: `POST /api/telegram/set-webhook` dengan body `{"url": "https://<backend>/api/telegram/webhook"}` (butuh cookie sesi). Alternatif: `POST /api/telegram/test` untuk menguji kirim.
 - Catat URL hasil deploy, mis. `https://axtra-backend.vercel.app`.
@@ -602,10 +624,11 @@ menentukan tujuan rewrite, jadi harus diisi di Vercel (bukan hanya lokal).
 ## Batasan saat ini
 
 - Aplikasi masih **single-owner**, bukan multi-tenant.
-- Jurnal dan target bersifat minimal: tanpa UI web khusus, tanpa pengingat per-entri.
+- Jurnal dan target bersifat minimal: tanpa pengingat per-entri (gunakan fitur Jadwal).
 - Belum ada AI mentor.
-- Automation berjalan lewat satu cron harian (`0 14 * * *` UTC). Di Vercel Hobby, laporan terkirim pada jam cron, bukan tepat pada `report_hour`.
-- Push notification PWA belum; notifikasi proaktif hanya lewat Telegram.
+- Automation laporan berjalan lewat cron harian (`0 14 * * *` UTC). Di Vercel Hobby, laporan terkirim pada jam cron, bukan tepat pada `report_hour`.
+- Notifikasi jadwal butuh cron eksternal per menit; tanpa itu reminder hanya terkirim saat endpoint `/api/cron/minutely` dipanggil. Presisi menit, bukan detik.
+- Web Push membutuhkan PWA ter-install/izin browser (iOS Safari mewajibkan app ditambahkan ke Home Screen).
 - GitHub integration masih read-only untuk indexing repo; belum ada OAuth, commit, issue, atau PR write.
 - Vibe Coding tidak mengeksekusi kode dan tidak mengubah repo.
 - Generated Image bergantung pada kredit/provider eksternal; tidak ada model gambar gratis yang dijamin.
@@ -620,7 +643,7 @@ menentukan tujuan rewrite, jadi harus diisi di Vercel (bukan hanya lokal).
 | 1 | Chat, streaming, memori, profil, auth | ✅ selesai |
 | 2 | Journal, target, proyek | 🟡 proyek lengkap; journal/target minimal selesai |
 | 3 | AI Mentor, skill evidence, laporan | 🟡 laporan harian/mingguan selesai; AI Mentor belum |
-| 4 | Automation, Telegram, PWA push | 🟡 bot Telegram, cron, retry outbox selesai; PWA push belum |
+| 4 | Automation, Telegram, PWA push | 🟡 bot Telegram, cron, retry outbox, jadwal + PWA push selesai; cron per menit butuh layanan eksternal |
 | 5 | GitHub + Vibe Coding | 🟡 Vibe Coding MVP selesai; GitHub write/OAuth belum |
 | 6 | Riset web, creator tools, image | 🟡 Riset Web + Generated Image selesai; creator content tools belum |
 | Lintas fase | Multi-provider, settings model teks/gambar, orchestrator beranda | ✅ selesai |

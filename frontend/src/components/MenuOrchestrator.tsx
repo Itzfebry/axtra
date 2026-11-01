@@ -9,6 +9,7 @@ import { Briefcase, FolderKanban, Globe, MessageSquare, Send } from "lucide-reac
 import { AssistantDigest } from "@/components/AssistantDigest";
 import {
   createMemory,
+  createSchedule,
   orchestrate,
   type OrchestratorAction,
   type OrchestratorMenuEntry,
@@ -117,6 +118,16 @@ export function MenuOrchestrator({
               content: action.content,
               type: action.memory_type,
             });
+          } else if (action.type === "create_schedule" && action.title) {
+            if (action.due_in_minutes || action.due_at) {
+              void createSchedule({
+                title: action.title,
+                note: action.note,
+                ...(action.due_in_minutes
+                  ? { due_in_minutes: action.due_in_minutes }
+                  : { due_at: action.due_at }),
+              });
+            }
           }
         }
 

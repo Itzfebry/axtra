@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -18,6 +19,7 @@ from app.schemas import (
     OrchestratorRequest,
 )
 from app.services.feature_persona import load_feature_persona
+from app.services.journal_service import WIB
 
 router = APIRouter(prefix="/api/orchestrator", tags=["orchestrator"])
 
@@ -28,6 +30,7 @@ _ALLOWED_ROUTES = {
     "/profile",
     "/settings",
     "/jobs",
+    "/jadwal",
 }
 
 # Chat modes are sub-tools of /chat; expose each so intent maps to the right one.
@@ -81,6 +84,7 @@ Balas HANYA JSON valid tanpa teks lain:
     {"type": "menu_rename", "labels": {"<id>": "<nama baru>"}},
     {"type": "set_theme", "theme": "light"},
     {"type": "save_memory", "content": "<fakta yang ingin diingat>", "memory_type": "<identity|episodic|semantic|project|goal|skill|conversation>"},
+    {"type": "create_schedule", "title": "<judul singkat>", "note": "<opsional>", "due_in_minutes": 30},
     {"type": "reset_menu"}
   ]
 }
@@ -106,6 +110,12 @@ semantic (fakta umum), project (proyek), goal (target), skill (kemampuan), \
 conversation (ringkasan percakapan). Bila ragu pakai semantic.
 - Gunakan MEMORI RELEVAN di konteks untuk memahami pengguna. Jangan menyalin \
 atau menyimpan ulang memori yang sudah tercantum.
+- create_schedule: buat pengingat/jadwal. "title" singkat (mis. "minum obat"), \
+"note" opsional, dan isi SALAH SATU: "due_in_minutes" (menit dari sekarang, untuk \
+"dalam 30 menit"/timer) atau "due_at" (waktu absolut ISO, mis. \
+"2026-11-03T09:00:00+07:00", untuk "besok jam 9"/tanggal tertentu). \
+Waktu sekarang (WIB) ada di konteks; hitung due_at dari situ. Jangan mengarang \
+masa lalu.
 - reset_menu: tanpa field lain.
 - Sertakan actions: [] bila tidak ada aksi yang cocok.
 - Jangan mengarang id, nama fitur, rute, atau fakta.
@@ -243,6 +253,42 @@ def _sanitize_actions(
             target = raw.get("target") or raw.get("id")
             if isinstance(target, str) and target in known_set:
                 actions.append(OrchestratorAction(type="focus_menu", target=target))
+        elif action_type == "create_schedule":
+            title = raw.get("title")
+            if isinstance(title, str) and title.strip():
+                note = raw.get("note")
+                note = (
+                    note.strip()[:2000]
+                    if isinstance(note, str) and note.strip()
+                    else None
+                )
+                due_at = raw.get("due_at")
+                due_at = (
+                    due_at.strip()[:64]
+                    if isinstance(due_at, str) and due_at.strip()
+                    else None
+                )
+                due_minutes: int | None
+                try:
+                    due_minutes = (
+                        int(raw["due_in_minutes"])
+                        if raw.get("due_in_minutes") is not None
+                        else None
+                    )
+                except (TypeError, ValueError):
+                    due_minutes = None
+                if due_minutes is not None and due_minutes < 1:
+                    due_minutes = None
+                if due_at or due_minutes:
+                    actions.append(
+                        OrchestratorAction(
+                            type="create_schedule",
+                            title=title.strip()[:200],
+                            note=note,
+                            due_at=due_at,
+                            due_in_minutes=due_minutes,
+                        )
+                    )
         elif action_type == "reset_menu":
             actions.append(OrchestratorAction(type="reset_menu"))
     return actions
@@ -264,6 +310,13 @@ async def orchestrate(
         system += "\n\n" + persona
     if memories:
         system += "\n\n" + memories
+    now_wib = datetime.now(timezone.utc).astimezone(WIB)
+    system += (
+        "\n\nWAKTU SEKARANG (WIB): "
+        + now_wib.strftime("%A, %d %B %Y %H:%M")
+        + "\nNomor hari: "
+        + str(now_wib.isoweekday())
+    )
 
     messages = [ChatMessage(role="system", content=system)]
     for item in request.history[-8:]:

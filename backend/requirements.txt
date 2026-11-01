@@ -8,3 +8,4 @@ python-multipart==0.0.20
 tenacity==9.0.0
 pypdf==5.1.0
 cryptography==50.0.2
+pywebpush==2.5.0

@@ -10,6 +10,7 @@ import base64
 import json
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
 from supabase import AsyncClient
@@ -17,7 +18,7 @@ from supabase import AsyncClient
 from app.config import Settings
 from app.llm import LLMProviderError
 from app.memory_service_provider import build_memory_extractor, build_memory_service
-from app.schemas import GoalCreate, JournalEntryCreate
+from app.schemas import GoalCreate, JournalEntryCreate, ScheduleCreate
 from app.services.chat_service import ChatService
 from app.services.crawl_provider import crawl, firecrawl_ready, resolve_user_provider
 from app.services.crawlers import firecrawl
@@ -27,8 +28,9 @@ from app.services.image_service import (
     generate_image,
     load_image_preference,
 )
-from app.services.journal_service import JournalService, today_wib
+from app.services.journal_service import JournalService, today_wib, WIB
 from app.services.llm_router import resolve_active_llm
+from app.services.schedule_service import ScheduleService
 from app.services.telegram_client import (
     TelegramClient,
     TelegramError,
@@ -48,6 +50,60 @@ logger = logging.getLogger("axtra.telegram")
 
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
+# Duration parsing for /timer and "/jadwal +25m | ...": e.g. +25m, +1h30m, +90s.
+_DURATION_RE = re.compile(r"^\+?\s*(?:\d+\s*[smhdw]\s*)+$", re.IGNORECASE)
+_DURATION_PART_RE = re.compile(r"(\d+)\s*([smhdw])", re.IGNORECASE)
+_UNIT_SECONDS = {"s": 1, "m": 60, "h": 3600, "d": 86400, "w": 604800}
+_TIME_RE = re.compile(r"^(\d{1,2}):(\d{2})$")
+_DATE_TIME_RE = re.compile(
+    r"^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})$"
+)
+
+
+def parse_duration_minutes(text: str) -> int | None:
+    """Parse ``+1h30m`` style durations into whole minutes (min 1)."""
+    text = text.strip()
+    if not text.startswith("+") or not _DURATION_RE.match(text):
+        return None
+    total = 0
+    for amount, unit in _DURATION_PART_RE.findall(text):
+        total += int(amount) * _UNIT_SECONDS[unit.lower()]
+    if total <= 0:
+        return None
+    return max(1, round(total / 60))
+
+
+def parse_due_wib(text: str, *, now: datetime | None = None) -> datetime | None:
+    """Parse a WIB due time: ``+25m``, ``HH:MM``, or ``YYYY-MM-DD HH:MM``."""
+    current = now or datetime.now(timezone.utc).astimezone(WIB)
+    text = text.strip()
+    if not text:
+        return None
+    minutes = parse_duration_minutes(text)
+    if minutes is not None:
+        return current + timedelta(minutes=minutes)
+    match = _DATE_TIME_RE.match(text)
+    if match:
+        year, month, day, hour, minute = (int(part) for part in match.groups())
+        try:
+            return datetime(year, month, day, hour, minute, tzinfo=WIB)
+        except ValueError:
+            return None
+    match = _TIME_RE.match(text)
+    if match:
+        hour, minute = int(match.group(1)), int(match.group(2))
+        if hour > 23 or minute > 59:
+            return None
+        candidate = current.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate <= current:
+            candidate += timedelta(days=1)
+        return candidate
+    return None
+
+
+def _format_wib(value: datetime) -> str:
+    return value.astimezone(WIB).strftime("%a, %d %b %Y %H:%M") + " WIB"
+
 HELP_TEXT = """<b>Axtra di Telegram</b>
 
 <b>Chat & ingatan</b>
@@ -63,6 +119,9 @@ HELP_TEXT = """<b>Axtra di Telegram</b>
 /jurnal [catatan] — catat atau lihat jurnal hari ini
 /target [judul] — lihat atau buat target
 /selesai &lt;nomor&gt; — tandai target selesai
+/jadwal — lihat jadwal aktif
+/jadwal &lt;waktu&gt; | &lt;judul&gt; — buat pengingat (mis. "/jadwal +30m | minum obat", "/jadwal 20:00 | rapat")
+/timer &lt;durasi&gt; [judul] — pasang timer (mis. "/timer 25m pomodoro")
 /jobs [status] — daftar lamaran kerja
 
 <b>Lainnya</b>
@@ -157,6 +216,8 @@ class TelegramBot:
             "/jurnal": self._cmd_journal,
             "/target": self._cmd_goals,
             "/selesai": self._cmd_complete_goal,
+            "/jadwal": self._cmd_schedule,
+            "/timer": self._cmd_timer,
             "/laporan": self._cmd_report,
             "/pemakaian": self._cmd_usage,
             "/pengaturan": self._cmd_settings,
@@ -464,6 +525,96 @@ class TelegramBot:
         )
         await self._send(chat_id, f"Target selesai: <b>{escape_html(updated.title)}</b>")
 
+    async def _cmd_schedule(self, chat_id: str, link: dict[str, Any], args: str) -> None:
+        service = ScheduleService(self.client)
+        if not args:
+            schedules = await service.list(self.user_id, status="active", limit=20)
+            if not schedules:
+                await self._send(
+                    chat_id,
+                    "Belum ada jadwal aktif. Buat dengan "
+                    "<code>/jadwal +30m | minum obat</code> atau "
+                    "<code>/jadwal 20:00 | rapat</code>.",
+                )
+                return
+            lines = ["<b>Jadwal aktif</b>"]
+            keyboard: list[list[dict[str, str]]] = []
+            for schedule in schedules:
+                lines.append(
+                    f"• {escape_html(schedule.title)} — "
+                    f"<i>{_format_wib(schedule.due_at)}</i>"
+                )
+                keyboard.append(
+                    [
+                        {
+                            "text": f"✔ {schedule.title[:22]}",
+                            "callback_data": f"sch:done:{schedule.id}",
+                        }
+                    ]
+                )
+            await self._send(
+                chat_id,
+                "\n".join(lines),
+                reply_markup={"inline_keyboard": keyboard},
+            )
+            return
+
+        if "|" not in args:
+            await self._send(
+                chat_id,
+                "Format: <code>/jadwal &lt;waktu&gt; | &lt;judul&gt;</code>\n"
+                "Contoh: <code>/jadwal +30m | minum obat</code> atau "
+                "<code>/jadwal 20:00 | rapat</code>.",
+            )
+            return
+        when_raw, title = args.split("|", 1)
+        due = parse_due_wib(when_raw)
+        if due is None:
+            await self._send(
+                chat_id,
+                "Waktu tidak dikenali. Pakai <code>+30m</code>, "
+                "<code>20:00</code>, atau <code>2026-11-03 09:00</code>.",
+            )
+            return
+        title = title.strip()[:200] or "Pengingat"
+        schedule = await service.create(
+            self.user_id,
+            ScheduleCreate(title=title, due_at=due),
+            source="telegram",
+            source_ref={"chat_id": chat_id},
+        )
+        await self._send(
+            chat_id,
+            f"Jadwal dibuat: <b>{escape_html(schedule.title)}</b>\n"
+            f"<i>{_format_wib(schedule.due_at)}</i>",
+        )
+
+    async def _cmd_timer(self, chat_id: str, link: dict[str, Any], args: str) -> None:
+        if not args:
+            await self._send(chat_id, "Format: <code>/timer &lt;durasi&gt; [judul]</code>")
+            return
+        first, _, rest = args.partition(" ")
+        minutes = parse_duration_minutes(first)
+        if minutes is None:
+            await self._send(
+                chat_id,
+                "Durasi tidak dikenali. Contoh: <code>/timer 25m pomodoro</code>, "
+                "<code>/timer 1h30m</code>.",
+            )
+            return
+        title = rest.strip()[:200] or f"Timer {minutes} menit"
+        schedule = await ScheduleService(self.client).create(
+            self.user_id,
+            ScheduleCreate(title=title, kind="timer", due_in_minutes=minutes),
+            source="telegram",
+            source_ref={"chat_id": chat_id},
+        )
+        await self._send(
+            chat_id,
+            f"Timer dipasang: <b>{escape_html(schedule.title)}</b>\n"
+            f"Berakhir <i>{_format_wib(schedule.due_at)}</i>",
+        )
+
     async def _cmd_report(self, chat_id: str, link: dict[str, Any], args: str) -> None:
         report = await build_daily_report(self.settings, self.client, self.user_id)
         await self._send(chat_id, report)
@@ -524,6 +675,31 @@ class TelegramBot:
                 await build_memory_service(self.client).delete(self.user_id, memory_id)
                 await self.telegram.answer_callback_query(callback_id, "Memori dihapus.")
                 await self._send(chat_id, "Memori dihapus.")
+            elif data.startswith("sch:done:"):
+                schedule_id = data.split(":", 2)[2]
+                await ScheduleService(self.client).complete(self.user_id, schedule_id)
+                await self.telegram.answer_callback_query(callback_id, "Jadwal selesai.")
+                await self._send(chat_id, "Jadwal ditandai selesai.")
+            elif data.startswith("sch:snooze:"):
+                parts = data.split(":")
+                minutes = int(parts[2])
+                schedule_id = parts[3]
+                updated = await ScheduleService(self.client).snooze(
+                    self.user_id, schedule_id, minutes
+                )
+                await self.telegram.answer_callback_query(
+                    callback_id, f"Ditunda {minutes} menit."
+                )
+                await self._send(
+                    chat_id,
+                    f"Jadwal ditunda {minutes} menit ke "
+                    f"<i>{_format_wib(updated.due_at)}</i>.",
+                )
+            elif data.startswith("sch:cancel:"):
+                schedule_id = data.split(":", 2)[2]
+                await ScheduleService(self.client).cancel(self.user_id, schedule_id)
+                await self.telegram.answer_callback_query(callback_id, "Jadwal dibatalkan.")
+                await self._send(chat_id, "Jadwal dibatalkan.")
             else:
                 await self.telegram.answer_callback_query(callback_id, "Aksi tidak dikenal.")
         except Exception as exc:  # noqa: BLE001

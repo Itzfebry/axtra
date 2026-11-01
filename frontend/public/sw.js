@@ -57,14 +57,38 @@ self.addEventListener("fetch", (event) => {
   }
 });
 
-/* Push notifications (Phase 4 placeholder).
+/* Push notifications: render the schedule reminder and focus the app on click. */
 self.addEventListener("push", (event) => {
-  if (!event.data) return;
+  let payload = { title: "Axtra", body: "", url: "/jadwal", tag: undefined };
+  try {
+    if (event.data) payload = { ...payload, ...event.data.json() };
+  } catch {
+    if (event.data) payload.body = event.data.text();
+  }
   event.waitUntil(
-    self.registration.showNotification("Axtra", {
-      body: event.data.text(),
-      icon: "/icon.svg",
+    self.registration.showNotification(payload.title || "Axtra", {
+      body: payload.body || "",
+      icon: "/axtratr.png",
+      badge: "/axtratr.png",
+      tag: payload.tag,
+      data: { url: payload.url || "/jadwal" },
     })
   );
 });
-*/
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || "/jadwal";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if ("focus" in client) {
+          client.navigate(target);
+          return client.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
+      return undefined;
+    })
+  );
+});

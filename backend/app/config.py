@@ -170,6 +170,13 @@ class Settings(BaseSettings):
     automation_quiet_start: int = 22  # WIB inclusive
     automation_quiet_end: int = 7  # WIB exclusive
 
+    # Web Push (PWA notifications). Generate a VAPID keypair with py_vapid;
+    # ``vapid_private_key`` holds the PEM (newlines may be escaped as ``\n``).
+    # ``vapid_subject`` is a contact URI (``mailto:`` or an https URL).
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_subject: str = "mailto:admin@axtra.local"
+
     @field_validator("memory_min_similarity", "memory_cluster_similarity", mode="before")
     @classmethod
     def _coerce_float(cls, value: object) -> object:
@@ -196,6 +203,11 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
+
+    @property
+    def push_ready(self) -> bool:
+        """True when a VAPID keypair is configured for Web Push."""
+        return bool(self.vapid_public_key and self.vapid_private_key)
 
     @property
     def default_chat_model(self) -> str:

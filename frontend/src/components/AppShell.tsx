@@ -126,6 +126,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       "/profile": "Profil",
       "/projects": "Proyek",
       "/jobs": "Cari Kerja",
+      "/jadwal": "Jadwal",
       "/images": "Gambar",
       "/settings": "Pengaturan",
     };
@@ -196,6 +197,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/projects/") ||
     pathname === "/jobs" ||
     pathname.startsWith("/jobs/") ||
+    pathname === "/jadwal" ||
     pathname === "/images" ||
     pathname === "/settings";
 

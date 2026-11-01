@@ -832,6 +832,7 @@ class OrchestratorAction(BaseModel):
         "save_memory",
         "new_conversation",
         "focus_menu",
+        "create_schedule",
     ]
     order: list[str] | None = None
     hidden: list[str] | None = None
@@ -844,6 +845,10 @@ class OrchestratorAction(BaseModel):
     title: str | None = None
     mode: str | None = None
     target: str | None = None
+    # create_schedule fields
+    note: str | None = None
+    due_at: str | None = None
+    due_in_minutes: int | None = None
 
 
 class OrchestratorOut(BaseModel):
@@ -1118,3 +1123,99 @@ class CronTickOut(BaseModel):
     outbox_sent: int = 0
     outbox_failed: int = 0
     detail: str = ""
+
+
+class CronMinutelyOut(BaseModel):
+    ok: bool = True
+    schedules_fired: int = 0
+    push_sent: int = 0
+    push_failed: int = 0
+    outbox_sent: int = 0
+    outbox_failed: int = 0
+    detail: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Schedules / reminders (one-off + countdown timers)
+# ---------------------------------------------------------------------------
+ScheduleKind = Literal["once", "timer"]
+ScheduleStatus = Literal["active", "done", "cancelled"]
+ScheduleChannel = Literal["telegram", "push"]
+
+
+class ScheduleCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    note: str = Field(default="", max_length=2000)
+    kind: ScheduleKind = "once"
+    # Absolute time (ISO). A naive value is interpreted as WIB (Asia/Jakarta).
+    due_at: datetime | None = None
+    # Alternative to ``due_at``: minutes from now (used by timers).
+    due_in_minutes: int | None = Field(default=None, ge=1, le=60 * 24 * 365)
+    channels: list[ScheduleChannel] = Field(
+        default_factory=lambda: ["telegram", "push"]
+    )
+
+    @model_validator(mode="after")
+    def _require_due(self) -> "ScheduleCreate":
+        if self.due_at is None and self.due_in_minutes is None:
+            raise ValueError("Isi due_at atau due_in_minutes.")
+        return self
+
+
+class ScheduleUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    note: str | None = Field(default=None, max_length=2000)
+    due_at: datetime | None = None
+    channels: list[ScheduleChannel] | None = None
+
+
+class ScheduleSnooze(BaseModel):
+    minutes: int = Field(ge=1, le=60 * 24 * 7)
+
+
+class ScheduleOut(BaseModel):
+    id: str
+    title: str
+    note: str = ""
+    kind: ScheduleKind = "once"
+    due_at: datetime
+    status: ScheduleStatus = "active"
+    channels: list[str] = Field(default_factory=list)
+    source: str = "web"
+    fired_at: datetime | None = None
+    done_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    # Seconds until due (negative when overdue). Computed for the UI countdown.
+    due_in_seconds: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# Web Push (PWA)
+# ---------------------------------------------------------------------------
+class PushConfigOut(BaseModel):
+    enabled: bool = False
+    public_key: str = ""
+
+
+class PushSubscriptionIn(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2000)
+    keys: dict[str, str]
+    user_agent: str = Field(default="", max_length=400)
+
+    @model_validator(mode="after")
+    def _require_keys(self) -> "PushSubscriptionIn":
+        if not self.keys.get("p256dh") or not self.keys.get("auth"):
+            raise ValueError("keys.p256dh dan keys.auth wajib diisi.")
+        return self
+
+
+class PushUnsubscribeIn(BaseModel):
+    endpoint: str = Field(min_length=1, max_length=2000)
+
+
+class PushResultOut(BaseModel):
+    ok: bool = True
+    sent: int = 0
+    failed: int = 0
+    removed: int = 0

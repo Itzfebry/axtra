@@ -1118,7 +1118,14 @@ export type OrchestratorAction =
   | { type: "set_theme"; theme?: "light" | "dark" }
   | { type: "save_memory"; content?: string; memory_type?: string }
   | { type: "new_conversation"; mode?: string; title?: string; prompt?: string }
-  | { type: "focus_menu"; target?: string };
+  | { type: "focus_menu"; target?: string }
+  | {
+      type: "create_schedule";
+      title?: string;
+      note?: string;
+      due_at?: string;
+      due_in_minutes?: number;
+    };
 
 export type OrchestratorResponse = {
   reply: string;
@@ -1961,5 +1968,109 @@ export async function* streamImageGeneration(
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Schedules / reminders (one-off reminders + countdown timers)
+// ---------------------------------------------------------------------------
+export type Schedule = {
+  id: string;
+  title: string;
+  note: string;
+  kind: "once" | "timer";
+  due_at: string;
+  status: "active" | "done" | "cancelled";
+  channels: string[];
+  source: string;
+  fired_at: string | null;
+  done_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  due_in_seconds: number | null;
+};
+
+export type ScheduleInput = {
+  title: string;
+  note?: string;
+  kind?: "once" | "timer";
+  due_at?: string;
+  due_in_minutes?: number;
+  channels?: string[];
+};
+
+export async function fetchSchedules(
+  statusFilter = "",
+): Promise<Schedule[]> {
+  const suffix = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : "";
+  const data = await apiFetch<Schedule[]>(`/schedules${suffix}`);
+  return data ?? [];
+}
+
+export async function createSchedule(input: ScheduleInput): Promise<Schedule> {
+  return apiFetch<Schedule>("/schedules", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateSchedule(
+  id: string,
+  input: Partial<ScheduleInput>,
+): Promise<Schedule> {
+  return apiFetch<Schedule>(`/schedules/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function deleteSchedule(id: string): Promise<void> {
+  await apiFetch<void>(`/schedules/${id}`, { method: "DELETE" });
+}
+
+export async function snoozeSchedule(id: string, minutes: number): Promise<Schedule> {
+  return apiFetch<Schedule>(`/schedules/${id}/snooze`, {
+    method: "POST",
+    body: JSON.stringify({ minutes }),
+  });
+}
+
+export async function completeSchedule(id: string): Promise<Schedule> {
+  return apiFetch<Schedule>(`/schedules/${id}/complete`, { method: "POST" });
+}
+
+export async function cancelSchedule(id: string): Promise<Schedule> {
+  return apiFetch<Schedule>(`/schedules/${id}/cancel`, { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// Web Push (PWA)
+// ---------------------------------------------------------------------------
+export type PushConfig = { enabled: boolean; public_key: string };
+export type PushResult = { ok: boolean; sent: number; failed: number; removed: number };
+
+export async function fetchPushConfig(): Promise<PushConfig> {
+  return apiFetch<PushConfig>("/push/config");
+}
+
+export async function subscribePush(input: {
+  endpoint: string;
+  keys: Record<string, string>;
+  user_agent?: string;
+}): Promise<PushResult> {
+  return apiFetch<PushResult>("/push/subscribe", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function unsubscribePush(endpoint: string): Promise<void> {
+  await apiFetch<void>("/push/unsubscribe", {
+    method: "POST",
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
+export async function testPush(): Promise<PushResult> {
+  return apiFetch<PushResult>("/push/test", { method: "POST" });
 }
 

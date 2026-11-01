@@ -15,12 +15,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.config import Settings, get_settings
-from app.schemas import CronTickOut
+from app.schemas import CronMinutelyOut, CronTickOut, ScheduleOut
 from app.services.digest_service import build_daily_report, build_weekly_report
 from app.services.health_scheduler import refresh_stale_projects
 from app.services.journal_service import WIB
 from app.services.notification_service import deliver_due, enqueue
-from app.services.telegram_client import TelegramClient
+from app.services.push_service import send_push
+from app.services.schedule_service import ScheduleService
+from app.services.telegram_client import TelegramClient, escape_html
 from app.services.telegram_store import purge_updates
 
 logger = logging.getLogger("axtra.cron")
@@ -183,6 +185,115 @@ async def tick(
 
     if now_wib.weekday() == 6:
         await purge_updates(client, days=7)
+
+    result.detail = "; ".join(notes)[:1000]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Per-minute dispatch: fire due schedules (Telegram + Web Push) and drain the
+# outbox. Vercel Hobby cron cannot run per minute, so an external scheduler hits
+# ``/api/cron/minutely`` (see README).
+# ---------------------------------------------------------------------------
+def _schedule_keyboard(schedule_id: str) -> dict[str, Any]:
+    return {
+        "inline_keyboard": [
+            [{"text": "✔ Selesai", "callback_data": f"sch:done:{schedule_id}"}],
+            [
+                {"text": "+5 mnt", "callback_data": f"sch:snooze:5:{schedule_id}"},
+                {"text": "+10 mnt", "callback_data": f"sch:snooze:10:{schedule_id}"},
+                {"text": "+30 mnt", "callback_data": f"sch:snooze:30:{schedule_id}"},
+            ],
+            [{"text": "Batalkan", "callback_data": f"sch:cancel:{schedule_id}"}],
+        ]
+    }
+
+
+def schedule_message(schedule: ScheduleOut) -> str:
+    due = schedule.due_at.astimezone(WIB)
+    lines = [f"⏰ <b>{escape_html(schedule.title)}</b>"]
+    if schedule.note:
+        lines.append(escape_html(schedule.note))
+    lines.append(f"<i>{due.strftime('%a, %d %b %Y %H:%M')} WIB</i>")
+    return "\n".join(lines)
+
+
+async def _notify_schedule(
+    client, settings: Settings, schedule: ScheduleOut
+) -> tuple[int, int, int]:
+    """Fan out one fired schedule. Returns (push_sent, push_failed, push_removed)."""
+    channels = set(schedule.channels or [])
+    if "telegram" in channels and settings.telegram_bot_token:
+        links = await _enabled_links(client)
+        for link in links:
+            chat_id = str(link.get("chat_id") or "")
+            if not chat_id:
+                continue
+            user_id = str(link.get("user_id") or settings.owner_user_id)
+            try:
+                await enqueue(
+                    client,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    text=schedule_message(schedule),
+                    kind="schedule",
+                    payload_extra={"reply_markup": _schedule_keyboard(schedule.id)},
+                )
+            except Exception as exc:  # noqa: BLE001 - one chat must not sink the rest
+                logger.warning("Schedule enqueue failed for %s: %s", chat_id, exc)
+
+    push_sent = push_failed = push_removed = 0
+    if "push" in channels:
+        body = schedule.note or "Waktunya sekarang."
+        try:
+            push_sent, push_failed, push_removed = await send_push(
+                client,
+                settings,
+                settings.owner_user_id,
+                title=f"⏰ {schedule.title}",
+                body=body,
+                url="/jadwal",
+                tag=f"schedule-{schedule.id}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Push dispatch failed: %s", exc)
+    return push_sent, push_failed, push_removed
+
+
+@router.get("/minutely", response_model=CronMinutelyOut)
+@router.post("/minutely", response_model=CronMinutelyOut)
+async def minutely(
+    request: Request, settings: Settings = Depends(get_settings)
+) -> CronMinutelyOut:
+    _authorize(request, settings)
+
+    from app.supabase_client import get_owner_client
+
+    client = await get_owner_client()
+    result = CronMinutelyOut()
+    notes: list[str] = []
+
+    try:
+        due = await ScheduleService(client).claim_due()
+        result.schedules_fired = len(due)
+        for schedule in due:
+            sent, failed, _removed = await _notify_schedule(client, settings, schedule)
+            result.push_sent += sent
+            result.push_failed += failed
+    except Exception as exc:  # noqa: BLE001 - a bad schedule must not stop the outbox
+        logger.warning("Schedule dispatch failed: %s", exc)
+        notes.append(f"schedules: {exc}")
+
+    if settings.telegram_bot_token:
+        try:
+            sent, failed = await deliver_due(
+                client, TelegramClient(settings.telegram_bot_token)
+            )
+            result.outbox_sent = sent
+            result.outbox_failed = failed
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Outbox drain failed: %s", exc)
+            notes.append(f"outbox: {exc}")
 
     result.detail = "; ".join(notes)[:1000]
     return result

@@ -2,6 +2,7 @@ import {
   BadgeCheck,
   Brain,
   Briefcase,
+  CalendarClock,
   Code2,
   FolderKanban,
   Image as ImageIcon,
@@ -75,6 +76,13 @@ export const FEATURES: Feature[] = [
     description:
       "Lacak lamaran, crawl lowongan, cocokkan CV, dan buat cover letter.",
     icon: Briefcase,
+  },
+  {
+    id: "jadwal",
+    href: "/jadwal",
+    title: "Jadwal",
+    description: "Pengingat sekali waktu dan timer, dikirim ke Telegram dan PWA.",
+    icon: CalendarClock,
   },
   {
     id: "prd",
