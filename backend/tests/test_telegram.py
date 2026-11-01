@@ -12,7 +12,11 @@ from app.main import app
 from app.routers.cron import _quiet
 from app.schemas import GoalCreate, JournalEntryCreate, TelegramSettingsUpdate
 from app.services.journal_service import today_wib
-from app.services.telegram_client import escape_html, split_message
+from app.services.telegram_client import (
+    escape_html,
+    markdown_to_telegram_html,
+    split_message,
+)
 from app.services.telegram_store import in_quiet_hours
 
 
@@ -39,6 +43,58 @@ def test_split_message_splits_on_newlines_under_limit() -> None:
 def test_split_message_hard_cuts_when_no_newline() -> None:
     chunks = split_message("y" * 250, limit=100)
     assert [len(chunk) for chunk in chunks] == [100, 100, 50]
+
+
+def test_split_message_balances_open_tags() -> None:
+    text = "<b>" + ("a" * 250) + "</b>"
+    chunks = split_message(text, limit=100)
+    assert len(chunks) > 1
+    for chunk in chunks:
+        assert chunk.count("<b>") == chunk.count("</b>")
+        assert chunk.startswith("<b>")
+        assert chunk.endswith("</b>")
+
+
+# ---------------------------------------------------------------------------
+# Markdown -> Telegram HTML
+# ---------------------------------------------------------------------------
+def test_markdown_bold_italic_strike() -> None:
+    assert markdown_to_telegram_html("**tebal**") == "<b>tebal</b>"
+    assert markdown_to_telegram_html("*miring*") == "<i>miring</i>"
+    assert markdown_to_telegram_html("~~coret~~") == "<s>coret</s>"
+
+
+def test_markdown_inline_code_escapes_content() -> None:
+    assert markdown_to_telegram_html("`a < b`") == "<code>a &lt; b</code>"
+
+
+def test_markdown_fenced_code_block() -> None:
+    source = '```py\nprint("<x>")\n```'
+    assert markdown_to_telegram_html(source) == (
+        '<pre><code class="language-py">print("&lt;x&gt;")</code></pre>'
+    )
+
+
+def test_markdown_heading_becomes_bold() -> None:
+    assert markdown_to_telegram_html("## Judul") == "<b>Judul</b>"
+
+
+def test_markdown_list_and_quote() -> None:
+    assert markdown_to_telegram_html("- satu") == "• satu"
+    assert markdown_to_telegram_html("1. dua") == "1. dua"
+    assert markdown_to_telegram_html("> kutip") == "<blockquote>kutip</blockquote>"
+
+
+def test_markdown_link() -> None:
+    assert markdown_to_telegram_html("[Axtra](https://axtra.app)") == (
+        '<a href="https://axtra.app">Axtra</a>'
+    )
+
+
+def test_markdown_neutralises_raw_html() -> None:
+    assert markdown_to_telegram_html("<script>x</script>") == (
+        "&lt;script&gt;x&lt;/script&gt;"
+    )
 
 
 # ---------------------------------------------------------------------------

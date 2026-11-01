@@ -29,7 +29,12 @@ from app.services.image_service import (
 )
 from app.services.journal_service import JournalService, today_wib
 from app.services.llm_router import resolve_active_llm
-from app.services.telegram_client import TelegramClient, TelegramError, escape_html
+from app.services.telegram_client import (
+    TelegramClient,
+    TelegramError,
+    escape_html,
+    markdown_to_telegram_html,
+)
 from app.services.telegram_store import (
     ensure_conversation,
     ensure_link,
@@ -215,7 +220,9 @@ class TelegramBot:
         if error and not content:
             await self._send(chat_id, f"Gagal menjawab: {escape_html(error)}")
             return
-        await self._send(chat_id, escape_html(content) or "(jawaban kosong)")
+        if not content.strip():
+            content = "(jawaban kosong)"
+        await self._send(chat_id, markdown_to_telegram_html(content))
 
     async def _cmd_remember(self, chat_id: str, link: dict[str, Any], args: str) -> None:
         if not args:
