@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { inputClass } from "@/components/ui/input";
 import {
   fetchImageConfig,
   fetchImageModels,
@@ -21,9 +22,6 @@ import {
   type ImageStyle,
   type Provider,
 } from "@/lib/api";
-
-const inputClass =
-  "w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-foreground placeholder:text-muted/60 outline-none transition-colors duration-150 focus:border-primary/60 focus:ring-2 focus:ring-primary/15";
 
 export function ImageSettings() {
   const [providers, setProviders] = useState<Provider[] | null>(null);
@@ -245,7 +243,7 @@ export function ImageSettings() {
               type="button"
               onClick={() => void handleSaveModel()}
               disabled={busy !== null || !providerId}
-              className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
             >
               {busy === "model" ? (
                 <Loader2 size={12} className="animate-spin" aria-hidden />

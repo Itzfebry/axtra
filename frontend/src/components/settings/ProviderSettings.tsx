@@ -3,6 +3,8 @@
 import {
   AlertTriangle,
   Check,
+  ChevronRight,
+  Copy,
   Cpu,
   ExternalLink,
   KeyRound,
@@ -14,10 +16,12 @@ import {
   Sparkles,
   Trash2,
   Wifi,
+  X,
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { inputClass } from "@/components/ui/input";
 import { Modal, type ModalTone } from "@/components/ui/Modal";
 import {
   createProvider,
@@ -37,9 +41,6 @@ import {
   type ProviderQuota,
   type ProviderRecommendation,
 } from "@/lib/api";
-
-const inputClass =
-  "w-full rounded-lg border border-border bg-surface px-3 py-2 text-[13px] text-foreground placeholder:text-muted/60 outline-none transition-colors duration-150 focus:border-primary/60 focus:ring-2 focus:ring-primary/15";
 
 function formatContext(value: number | null): string {
   if (!value) return "?";
@@ -67,6 +68,13 @@ function statusLabel(provider: Provider): { text: string; className: string } {
   return { text: "Belum ada key", className: "text-muted" };
 }
 
+type ConfirmState = {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  run: () => Promise<void>;
+};
+
 export function ProviderSettings() {
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [activeId, setActiveId] = useState("");
@@ -92,6 +100,8 @@ export function ProviderSettings() {
     title: string;
     message?: string;
   } | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmState | null>(null);
+
   const provider = useMemo(
     () => providers?.find((item) => item.id === activeId) ?? null,
     [providers, activeId],
@@ -112,6 +122,12 @@ export function ProviderSettings() {
       setError(err instanceof Error ? err.message : "Gagal memuat provider."),
     );
   }, [load]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(null), 4000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const loadQuota = useCallback(async (providerId: string) => {
     try {
@@ -156,20 +172,30 @@ export function ProviderSettings() {
     }
   }
 
-  async function handleDeleteKey() {
-    if (!provider) return;
-    if (!window.confirm(`Hapus API key ${provider.label} milikmu?`)) return;
+  async function performDeleteKey(providerId: string, label: string) {
     setBusy("key");
     setError(null);
     try {
-      await deleteProviderKey(provider.id);
-      setNotice(`API key ${provider.label} dihapus.`);
+      await deleteProviderKey(providerId);
+      setNotice(`API key ${label} dihapus.`);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal menghapus key.");
     } finally {
       setBusy(null);
     }
+  }
+
+  function handleDeleteKey() {
+    if (!provider) return;
+    const { id, label } = provider;
+    setConfirm({
+      title: `Hapus API key ${label}?`,
+      message:
+        "Key terenkripsi dihapus dari server. Provider tetap ada dan bisa diisi key baru kapan saja.",
+      confirmLabel: "Hapus key",
+      run: () => performDeleteKey(id, label),
+    });
   }
 
   async function handlePing() {
@@ -276,25 +302,40 @@ export function ProviderSettings() {
     }
   }
 
-  async function handleDeleteProvider() {
-    if (!provider) return;
-    if (
-      !window.confirm(
-        `Hapus provider ${provider.label} beserta API key-nya?`,
-      )
-    )
-      return;
+  async function performDeleteProvider(providerId: string, label: string) {
     setBusy("delete");
     setError(null);
     try {
-      await deleteProvider(provider.id);
-      setNotice(`Provider ${provider.label} dihapus.`);
+      await deleteProvider(providerId);
+      setNotice(`Provider ${label} dihapus.`);
       setActiveId("");
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal menghapus provider.");
     } finally {
       setBusy(null);
+    }
+  }
+
+  function handleDeleteProvider() {
+    if (!provider) return;
+    const { id, label } = provider;
+    setConfirm({
+      title: `Hapus provider ${label}?`,
+      message:
+        "Provider custom dan API key tersimpannya akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.",
+      confirmLabel: "Hapus provider",
+      run: () => performDeleteProvider(id, label),
+    });
+  }
+
+  async function handleCopyBaseUrl() {
+    if (!provider) return;
+    try {
+      await navigator.clipboard.writeText(provider.base_url);
+      setNotice("Base URL disalin ke clipboard.");
+    } catch {
+      setError("Gagal menyalin base URL.");
     }
   }
 
@@ -313,9 +354,26 @@ export function ProviderSettings() {
 
   if (!providers) {
     return (
-      <div className="flex items-center gap-2 text-[13px] text-muted">
-        <Loader2 size={14} className="animate-spin" aria-hidden />
-        Memuat provider...
+      <div
+        aria-busy="true"
+        aria-live="polite"
+        className="grid items-start gap-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)]"
+      >
+        <div className="space-y-2 rounded-xl border border-border bg-surface p-4">
+          <div className="h-4 w-24 animate-pulse rounded bg-surface-muted" />
+          {Array.from({ length: 5 }).map((_, index) => (
+            <div
+              key={index}
+              className="h-12 animate-pulse rounded-lg bg-surface-muted"
+            />
+          ))}
+        </div>
+        <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
+          <div className="h-4 w-40 animate-pulse rounded bg-surface-muted" />
+          <div className="h-9 animate-pulse rounded-lg bg-surface-muted" />
+          <div className="h-9 animate-pulse rounded-lg bg-surface-muted" />
+          <div className="h-32 animate-pulse rounded-lg bg-surface-muted" />
+        </div>
       </div>
     );
   }
@@ -331,147 +389,186 @@ export function ProviderSettings() {
         </p>
       )}
       {notice && (
-        <p className="rounded-lg border border-success/30 bg-success/5 px-3 py-2 text-[12px] text-success">
+        <p
+          role="status"
+          className="rounded-lg border border-success/30 bg-success/5 px-3 py-2 text-[12px] text-success"
+        >
           {notice}
         </p>
       )}
 
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)]">
-      {/* Provider selector */}
-      <div className="rounded-xl border border-border bg-surface p-4">
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-[12px] uppercase tracking-wide text-muted">
-            Provider teks
-          </h2>
-          <button
-            type="button"
-            onClick={() => setShowAdd((value) => !value)}
-            className="inline-flex h-7 items-center gap-1 rounded-lg border border-border px-2 text-[11px] text-foreground transition-colors duration-150 hover:bg-surface-muted"
-          >
-            <Plus size={11} aria-hidden />
-            Tambah provider
-          </button>
-        </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(300px,0.8fr)_minmax(0,1.2fr)]">
+        {/* Provider selector — grid item stretches so the card can stick while scrolling */}
+        <div className="min-w-0">
+          <div className="rounded-xl border border-border bg-surface p-4 xl:sticky xl:top-4">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-[12px] uppercase tracking-wide text-muted">
+              Provider teks
+            </h2>
+            <button
+              type="button"
+              onClick={() => setShowAdd((value) => !value)}
+              className="inline-flex h-7 items-center gap-1 rounded-lg border border-border px-2 text-[11px] text-foreground transition-colors duration-150 hover:bg-surface-muted"
+            >
+              <Plus size={11} aria-hidden />
+              Tambah provider
+            </button>
+          </div>
 
-        {showAdd && (
-          <form
-            onSubmit={handleCreateProvider}
-            className="mt-3 space-y-2 rounded-lg border border-border bg-background p-3"
-          >
-            <p className="text-[11px] text-muted">
-              Provider OpenAI-compatible sendiri (endpoint <code>/chat/completions</code>).
-            </p>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <input
-                value={addLabel}
-                onChange={(event) => setAddLabel(event.target.value)}
-                placeholder="Nama (mis. Lokal LM Studio)"
-                className={inputClass}
-                autoComplete="off"
-              />
-              <input
-                value={addBaseUrl}
-                onChange={(event) => setAddBaseUrl(event.target.value)}
-                placeholder="Base URL (mis. http://localhost:1234/v1)"
-                className={inputClass}
-                autoComplete="off"
-              />
-              <input
-                type="password"
-                value={addKey}
-                onChange={(event) => setAddKey(event.target.value)}
-                placeholder="API key (opsional)"
-                className={inputClass}
-                autoComplete="off"
-              />
-              <input
-                value={addModel}
-                onChange={(event) => setAddModel(event.target.value)}
-                placeholder="Model awal (opsional)"
-                className={inputClass}
-                autoComplete="off"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="submit"
-                disabled={busy !== null || !addLabel.trim() || !addBaseUrl.trim()}
-                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
-              >
-                {busy === "add" ? (
-                  <Loader2 size={12} className="animate-spin" aria-hidden />
-                ) : (
-                  <Plus size={12} aria-hidden />
-                )}
-                Simpan provider
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAdd(false)}
-                className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-[12px] text-muted transition-colors duration-150 hover:bg-surface-muted"
-              >
-                Batal
-              </button>
-            </div>
-          </form>
-        )}
-
-        <ul className="mt-3 max-h-80 divide-y divide-border overflow-y-auto rounded-lg border border-border">
-          {providers.map((item) => {
-            const status = statusLabel(item);
-            const selected = item.id === activeId;
-            return (
-              <li
-                key={item.id}
-                className={`flex items-center gap-3 px-3 py-2.5 transition-colors duration-150 ${
-                  selected ? "bg-primary/5" : "bg-background"
-                }`}
-              >
+          {showAdd && (
+            <form
+              onSubmit={handleCreateProvider}
+              className="mt-3 space-y-2 rounded-lg border border-border bg-background p-3"
+            >
+              <p className="text-[11px] text-muted">
+                Provider OpenAI-compatible sendiri (endpoint{" "}
+                <code>/chat/completions</code>).
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input
+                  value={addLabel}
+                  onChange={(event) => setAddLabel(event.target.value)}
+                  placeholder="Nama (mis. Lokal LM Studio)"
+                  className={inputClass}
+                  autoComplete="off"
+                  autoFocus
+                />
+                <input
+                  value={addBaseUrl}
+                  onChange={(event) => setAddBaseUrl(event.target.value)}
+                  placeholder="Base URL (mis. http://localhost:1234/v1)"
+                  className={inputClass}
+                  autoComplete="off"
+                />
+                <input
+                  type="password"
+                  value={addKey}
+                  onChange={(event) => setAddKey(event.target.value)}
+                  placeholder="API key (opsional)"
+                  className={inputClass}
+                  autoComplete="new-password"
+                />
+                <input
+                  value={addModel}
+                  onChange={(event) => setAddModel(event.target.value)}
+                  placeholder="Model awal (opsional)"
+                  className={inputClass}
+                  autoComplete="off"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={busy !== null || !addLabel.trim() || !addBaseUrl.trim()}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+                >
+                  {busy === "add" ? (
+                    <Loader2 size={12} className="animate-spin" aria-hidden />
+                  ) : (
+                    <Plus size={12} aria-hidden />
+                  )}
+                  Simpan provider
+                </button>
                 <button
                   type="button"
-                  onClick={() => setActiveId(item.id)}
-                  className="min-w-0 flex-1 text-left"
+                  onClick={() => setShowAdd(false)}
+                  className="inline-flex h-8 items-center rounded-lg border border-border px-3 text-[12px] text-muted transition-colors duration-150 hover:bg-surface-muted"
                 >
-                  <span className="flex items-center gap-1.5">
-                    <span className="truncate text-[13px] font-medium text-foreground">
-                      {item.label}
-                    </span>
-                    {item.custom && <Tag label="custom" />}
-                    {item.active && (
-                      <span className="rounded border border-primary/40 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-primary">
-                        aktif
-                      </span>
-                    )}
-                  </span>
-                  <span className={`mt-0.5 block text-[11px] ${status.className}`}>
-                    {status.text}
-                  </span>
+                  Batal
                 </button>
-                {!item.active && (
-                  <button
-                    type="button"
-                    onClick={() => void handleActivate(item)}
-                    disabled={busy !== null}
-                    className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-border px-2.5 text-[11px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
-                  >
-                    {busy === `activate:${item.id}` ? (
-                      <Loader2 size={11} className="animate-spin" aria-hidden />
-                    ) : (
-                      <Zap size={11} aria-hidden />
-                    )}
-                    Pakai
-                  </button>
-                )}
-              </li>
-            );
-          })}
-        </ul>
-      </div>
+              </div>
+            </form>
+          )}
 
-      {provider && (
-        <div className="rounded-xl border border-border bg-surface p-4">
+          {providers.length === 0 ? (
+            <div className="mt-3 rounded-lg border border-dashed border-border bg-background px-4 py-8 text-center">
+              <p className="text-[12px] font-medium text-foreground">
+                Belum ada provider
+              </p>
+              <p className="mt-1 text-[11px] text-muted">
+                Tambahkan provider OpenAI-compatible atau isi key provider bawaan.
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowAdd(true)}
+                className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90"
+              >
+                <Plus size={12} aria-hidden />
+                Tambah provider
+              </button>
+            </div>
+          ) : (
+            <ul className="mt-3 max-h-80 divide-y divide-border overflow-y-auto rounded-lg border border-border">
+              {providers.map((item) => {
+                const status = statusLabel(item);
+                const selected = item.id === activeId;
+                return (
+                  <li key={item.id}>
+                    <div
+                      className={`flex items-center gap-3 px-3 py-2.5 transition-colors duration-150 ${
+                        selected ? "bg-primary/5" : "bg-background"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => setActiveId(item.id)}
+                        aria-current={selected}
+                        className={`min-w-0 flex-1 cursor-pointer rounded-md px-1 py-0.5 text-left transition-colors duration-150 ${
+                          selected
+                            ? ""
+                            : "hover:bg-surface-muted"
+                        }`}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <span className="truncate text-[13px] font-medium text-foreground">
+                            {item.label}
+                          </span>
+                          {item.custom && <Tag label="custom" />}
+                          {item.active && (
+                            <span className="rounded border border-primary/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-primary">
+                              aktif
+                            </span>
+                          )}
+                        </span>
+                        <span
+                          className={`mt-0.5 block text-[11px] ${status.className}`}
+                        >
+                          {status.text}
+                        </span>
+                      </button>
+                      {!item.active && (
+                        <button
+                          type="button"
+                          onClick={() => void handleActivate(item)}
+                          disabled={busy !== null}
+                          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border border-border px-2.5 text-[11px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
+                        >
+                          {busy === `activate:${item.id}` ? (
+                            <Loader2 size={11} className="animate-spin" aria-hidden />
+                          ) : (
+                            <Zap size={11} aria-hidden />
+                          )}
+                          Pakai
+                        </button>
+                      )}
+                      <ChevronRight
+                        size={13}
+                        aria-hidden
+                        className={selected ? "text-primary" : "text-muted/50"}
+                      />
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          </div>
+        </div>
+
+        {provider && (
+          <div className="self-start rounded-xl border border-border bg-surface p-4">
             <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
+              <div className="min-w-0">
                 <h2 className="text-[13px] font-medium text-foreground">
                   {provider.label}
                 </h2>
@@ -487,9 +584,21 @@ export function ProviderSettings() {
               </a>
             </div>
 
-            <p className="mt-2 truncate text-[11px] text-muted">
-              Base URL: <span className="text-foreground/80">{provider.base_url}</span>
-            </p>
+            <div className="mt-2 flex items-center gap-2">
+              <p className="min-w-0 truncate text-[11px] text-muted">
+                Base URL:{" "}
+                <span className="text-foreground/80">{provider.base_url}</span>
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleCopyBaseUrl()}
+                aria-label="Salin base URL"
+                title="Salin base URL"
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-border text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+              >
+                <Copy size={11} aria-hidden />
+              </button>
+            </div>
 
             <form onSubmit={handleSaveKey} className="mt-3 space-y-2">
               <label htmlFor="provider-key" className="block text-[11px] text-muted">
@@ -515,13 +624,13 @@ export function ProviderSettings() {
                           : "Tempel API key provider di sini"
                     }
                     className={`${inputClass} pl-8`}
-                    autoComplete="off"
+                    autoComplete="new-password"
                   />
                 </div>
                 <button
                   type="submit"
                   disabled={busy !== null || !keyInput.trim()}
-                  className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-[12px] font-medium text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
+                  className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-[12px] font-medium text-primary-foreground transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
                 >
                   {busy === "key" ? (
                     <Loader2 size={13} className="animate-spin" aria-hidden />
@@ -533,7 +642,7 @@ export function ProviderSettings() {
                 {provider.user_key && (
                   <button
                     type="button"
-                    onClick={() => void handleDeleteKey()}
+                    onClick={handleDeleteKey}
                     disabled={busy !== null}
                     className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-danger transition-colors duration-150 hover:bg-danger/5 disabled:opacity-40"
                   >
@@ -575,14 +684,10 @@ export function ProviderSettings() {
                   {ping.latency_ms != null && ` · ${ping.latency_ms} ms`}
                 </span>
               )}
-              <span className="text-[11px] text-muted">
-                Status key: {statusLabel(provider).text}
-                {provider.key_masked ? ` (${provider.key_masked})` : ""}
-              </span>
               {provider.custom && (
                 <button
                   type="button"
-                  onClick={() => void handleDeleteProvider()}
+                  onClick={handleDeleteProvider}
                   disabled={busy !== null}
                   className="ml-auto inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-danger transition-colors duration-150 hover:bg-danger/5 disabled:opacity-40"
                 >
@@ -591,8 +696,8 @@ export function ProviderSettings() {
                 </button>
               )}
             </div>
-        </div>
-      )}
+          </div>
+        )}
       </div>
 
       {provider && (
@@ -646,34 +751,48 @@ export function ProviderSettings() {
                 <Sparkles size={12} aria-hidden /> Rekomendasi
               </h2>
               <ul className="mt-3 grid gap-2 md:grid-cols-2 2xl:grid-cols-3">
-                {recs.map((rec) => (
-                  <li
-                    key={rec.model}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2"
-                  >
-                    <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <span className="truncate text-[12px] font-medium text-foreground">
-                        {rec.model}
-                      </span>
-                      {rec.free && <Tag label="free" tone="success" />}
-                      {rec.tags
-                        .filter((tag) => tag !== "free")
-                        .map((tag) => (
-                          <Tag key={tag} label={tag} />
-                        ))}
-                      <span className="text-[11px] text-muted">{rec.reason}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => void handleSelectModel(rec.model)}
-                      disabled={busy !== null}
-                      className="inline-flex h-7 items-center gap-1 rounded-lg border border-border px-2 text-[11px] text-foreground transition-colors duration-150 hover:bg-surface-muted disabled:opacity-40"
+                {recs.map((rec) => {
+                  const isActive = provider.selected_model === rec.model;
+                  return (
+                    <li
+                      key={rec.model}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-background px-3 py-2"
                     >
-                      <Zap size={11} aria-hidden />
-                      Pakai
-                    </button>
-                  </li>
-                ))}
+                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span className="max-w-[16rem] truncate text-[12px] font-medium text-foreground">
+                          {rec.model}
+                        </span>
+                        {rec.free && <Tag label="free" tone="success" />}
+                        {rec.tags
+                          .filter((tag) => tag !== "free")
+                          .map((tag) => (
+                            <Tag key={tag} label={tag} />
+                          ))}
+                        <span className="text-[11px] text-muted">{rec.reason}</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => void handleSelectModel(rec.model)}
+                        disabled={busy !== null || isActive}
+                        className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border px-2 text-[11px] transition-colors duration-150 disabled:opacity-60 ${
+                          isActive
+                            ? "border-primary/50 text-primary"
+                            : "border-border text-foreground hover:bg-surface-muted"
+                        }`}
+                      >
+                        {isActive ? (
+                          <>
+                            <Check size={11} aria-hidden /> Aktif
+                          </>
+                        ) : (
+                          <>
+                            <Zap size={11} aria-hidden /> Pakai
+                          </>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           )}
@@ -722,10 +841,20 @@ export function ProviderSettings() {
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
                   placeholder="Cari model teks..."
-                  className={`${inputClass} pl-8`}
+                  className={`${inputClass} pl-8 pr-8`}
                 />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    aria-label="Bersihkan pencarian"
+                    className="absolute right-2 top-1/2 inline-flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+                  >
+                    <X size={12} aria-hidden />
+                  </button>
+                )}
               </div>
-              <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-border px-2.5 py-2 text-[11px] text-foreground">
+              <label className="flex h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-border px-2.5 text-[11px] text-foreground">
                 <input
                   type="checkbox"
                   checked={freeOnly}
@@ -746,57 +875,83 @@ export function ProviderSettings() {
                   {visibleModels.length} dari {catalog.count} model
                   {catalog.cached ? " · cache" : ""}
                 </p>
-                <ul className="mt-2 grid max-h-[36rem] gap-1.5 overflow-y-auto pr-1 md:grid-cols-2 2xl:grid-cols-3">
-                  {visibleModels.map((model) => {
-                    const selected = provider.selected_model === model.id;
-                    return (
-                      <li
-                        key={model.id}
-                        className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
-                          selected
-                            ? "border-primary/50 bg-primary/5"
-                            : "border-border bg-background"
-                        }`}
+                {visibleModels.length === 0 ? (
+                  <div className="mt-2 rounded-lg border border-dashed border-border bg-background px-4 py-8 text-center">
+                    <p className="text-[12px] font-medium text-foreground">
+                      Tidak ada model yang cocok
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted">
+                      {freeOnly || search
+                        ? "Ubah kata kunci atau matikan filter gratis."
+                        : "Provider tidak mengembalikan model apa pun."}
+                    </p>
+                    {(freeOnly || search) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearch("");
+                          setFreeOnly(false);
+                        }}
+                        className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] text-foreground transition-colors duration-150 hover:bg-surface-muted"
                       >
-                        <div className="min-w-0">
-                          <p className="truncate text-[12px] font-medium text-foreground">
-                            {model.id}
-                          </p>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                            {model.free && <Tag label="free" tone="success" />}
-                            {model.modalities.map((modality) => (
-                              <Tag key={modality} label={modality} />
-                            ))}
-                            <span className="text-[10px] text-muted">
-                              ctx {formatContext(model.context_window)} ·{" "}
-                              {priceLabel(model)}
-                            </span>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => void handleSelectModel(model.id)}
-                          disabled={busy !== null || selected}
-                          className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border px-2 text-[11px] transition-colors duration-150 disabled:opacity-60 ${
+                        <X size={12} aria-hidden />
+                        Reset filter
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <ul className="mt-2 grid max-h-[36rem] gap-1.5 overflow-y-auto pr-1 md:grid-cols-2 2xl:grid-cols-3">
+                    {visibleModels.map((model) => {
+                      const selected = provider.selected_model === model.id;
+                      return (
+                        <li
+                          key={model.id}
+                          className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2 ${
                             selected
-                              ? "border-primary/50 text-primary"
-                              : "border-border text-foreground hover:bg-surface-muted"
+                              ? "border-primary/50 bg-primary/5"
+                              : "border-border bg-background"
                           }`}
                         >
-                          {selected ? (
-                            <>
-                              <Check size={11} aria-hidden /> Aktif
-                            </>
-                          ) : (
-                            <>
-                              <Cpu size={11} aria-hidden /> Pakai
-                            </>
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                          <div className="min-w-0">
+                            <p className="truncate text-[12px] font-medium text-foreground">
+                              {model.id}
+                            </p>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                              {model.free && <Tag label="free" tone="success" />}
+                              {model.modalities.map((modality) => (
+                                <Tag key={modality} label={modality} />
+                              ))}
+                              <span className="text-[10px] text-muted">
+                                ctx {formatContext(model.context_window)} ·{" "}
+                                {priceLabel(model)}
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleSelectModel(model.id)}
+                            disabled={busy !== null || selected}
+                            className={`inline-flex h-7 shrink-0 items-center gap-1 rounded-lg border px-2 text-[11px] transition-colors duration-150 disabled:opacity-60 ${
+                              selected
+                                ? "border-primary/50 text-primary"
+                                : "border-border text-foreground hover:bg-surface-muted"
+                            }`}
+                          >
+                            {selected ? (
+                              <>
+                                <Check size={11} aria-hidden /> Aktif
+                              </>
+                            ) : (
+                              <>
+                                <Cpu size={11} aria-hidden /> Pakai
+                              </>
+                            )}
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </>
             )}
           </div>
@@ -810,6 +965,24 @@ export function ProviderSettings() {
         message={modal?.message}
         onClose={() => setModal(null)}
       />
+
+      <Modal
+        open={confirm !== null}
+        tone="error"
+        title={confirm?.title ?? ""}
+        message={confirm?.message}
+        confirmLabel={confirm?.confirmLabel}
+        busy={busy !== null}
+        onClose={() => setConfirm(null)}
+        onConfirm={() => {
+          const action = confirm?.run;
+          if (!action) {
+            setConfirm(null);
+            return;
+          }
+          void action().finally(() => setConfirm(null));
+        }}
+      />
     </div>
   );
 }
@@ -821,7 +994,7 @@ function Tag({ label, tone }: { label: string; tone?: "success" }) {
       : "border-border bg-surface text-muted";
   return (
     <span
-      className={`rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wide ${className}`}
+      className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${className}`}
     >
       {label}
     </span>
@@ -837,14 +1010,19 @@ function QuotaBar({
   used: number;
   limit: number;
 }) {
-  const percent = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+  const unlimited = limit <= 0;
+  const percent = unlimited ? 0 : Math.min(100, Math.round((used / limit) * 100));
   return (
     <div>
       <div className="flex items-center justify-between text-[11px]">
         <span className="text-muted">{label}</span>
         <span className="tabular-nums text-foreground">
           {used.toLocaleString("id-ID")}
-          {limit > 0 ? ` / ${limit.toLocaleString("id-ID")}` : ""}
+          {unlimited ? (
+            <span className="text-muted"> · tanpa batas</span>
+          ) : (
+            ` / ${limit.toLocaleString("id-ID")} (${percent}%)`
+          )}
         </span>
       </div>
       <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-muted">
@@ -852,7 +1030,7 @@ function QuotaBar({
           className={`h-full rounded-full transition-[width] duration-300 ${
             percent >= 85 ? "bg-danger" : percent >= 60 ? "bg-warning" : "bg-primary"
           }`}
-          style={{ width: `${limit > 0 ? percent : 0}%` }}
+          style={{ width: `${percent}%` }}
         />
       </div>
     </div>
