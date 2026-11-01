@@ -22,7 +22,8 @@ Personal AI agent yang memahami pengguna secara berkelanjutan melalui memori, me
 | Generated Image | ✅ | Model gambar terpisah, katalog model, referensi gambar, style, rasio/resolusi, streaming, riwayat sesi, kuota harian |
 | Beranda orchestrator | ✅ | Perintah bahasa alami untuk membuka tool, mengatur menu, tema, atau menyimpan memori |
 | PWA | 🟡 | Manifest + service worker shell; push notification belum |
-| Automation / Telegram | ⏳ | Variabel env disiapkan, worker/scheduler belum ada |
+| Jurnal & target | ✅ | Jurnal harian + target minimal (DB + API; dipakai web dan Telegram) |
+| Automation / Telegram | 🟡 | Bot Telegram (webhook + polling), laporan harian/mingguan, retry outbox, cron fan-out; PWA push belum |
 | GitHub OAuth read/write | ⏳ | Saat ini hanya indexing repo publik/privat lewat token env |
 
 ## Arsitektur
@@ -303,7 +304,16 @@ Env contoh juga memuat slot `TOGETHER_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API
 | `PROJECT_HEALTH_DEBOUNCE_SECONDS` | `12` | Jeda debounce regenerasi |
 | `MODEL_TPM_LIMIT` | `8000` | Denominator meter token/menit; `0` sembunyikan |
 | `MODEL_DAILY_TOKEN_LIMIT` | `200000` | Denominator meter token/hari; `0` sembunyikan |
-| `TELEGRAM_BOT_TOKEN` | — | Disiapkan untuk Phase 4; belum dipakai |
+| `TELEGRAM_ENABLED` | `false` | Aktifkan webhook/polling bot |
+| `TELEGRAM_BOT_TOKEN` | — | Token bot dari BotFather |
+| `TELEGRAM_WEBHOOK_SECRET` | — | Dikirim Telegram di header `X-Telegram-Bot-Api-Secret-Token` |
+| `TELEGRAM_ALLOWED_CHAT_IDS` | — | Allowlist chat id, dipisah koma; kosong = hanya chat yang sudah tertaut |
+| `TELEGRAM_DEFAULT_MODE` | `general` | Mode chat default bot |
+| `CRON_SECRET` | — | Bearer secret untuk `/api/cron/tick` (Vercel Cron mengirim otomatis) |
+| `AUTOMATION_DAILY_REPORT_HOUR` | `21` | Jam laporan harian (WIB) |
+| `AUTOMATION_WEEKLY_REPORT_HOUR` | `20` | Jam review mingguan, hari Minggu (WIB) |
+| `AUTOMATION_QUIET_START` | `22` | Awal jam tenang (WIB) |
+| `AUTOMATION_QUIET_END` | `7` | Akhir jam tenang (WIB) |
 
 ### Frontend
 
@@ -374,6 +384,18 @@ Env contoh juga memuat slot `TOGETHER_API_KEY`, `DEEPSEEK_API_KEY`, `MISTRAL_API
 - Kredit Firecrawl dicatat di `crawl_usage_events`.
 - Mode Document menerima TXT, MD, dan PDF; teks disimpan di `chat_documents`, bukan file biner.
 - Konten web/dokumen diperlakukan sebagai data tidak tepercaya.
+
+### Jurnal, target, dan automation
+
+- Jurnal harian dan target tersimpan di `journal_entries` dan `goals`, diakses lewat `/api/journal` dan `/api/goals`, juga lewat bot Telegram (`/jurnal`, `/target`, `/selesai`).
+- Satu cron endpoint `GET|POST /api/cron/tick` (dijadwalkan `0 14 * * *` UTC) menjalankan semua tugas terjadwal: menyegarkan ringkasan kesehatan proyek yang `health_stale`, membangun laporan harian/mingguan, dan menguras antrean notifikasi.
+- Cron dilindungi `Authorization: Bearer $CRON_SECRET`; Vercel Cron mengirim header ini otomatis saat `CRON_SECRET` di-set.
+- Laporan bersifat idempoten per hari lewat tabel `automation_runs` (`kind`, `day_key`); tick ganda tidak mengirim dua kali.
+- Bot Telegram single-owner. Hanya chat id di `TELEGRAM_ALLOWED_CHAT_IDS` atau yang sudah tertaut di `telegram_links` yang dilayani; pesan lain ditolak.
+- Webhook `POST /api/telegram/webhook` divalidasi dari header `X-Telegram-Bot-Api-Secret-Token` (dibandingkan constant-time). `update_id` dideduplikasi di `telegram_updates`.
+- Dev lokal pakai long-polling: `backend/scripts/telegram_poll.py` (opsi `--drop-webhook`) memanggil dispatcher yang sama.
+- Pesan keluar memakai `parse_mode=HTML`; teks dinamis di-escape (`escape_html`) dan dipecah pada batas 4096 karakter.
+- Notifikasi proaktif masuk `notification_outbox` lalu dikirim oleh cron dengan backoff bertingkat (1, 5, 15, 60, 240 menit), maksimum 5 percobaan; baris permanen gagal ditandai `failed`.
 
 ### Proyek
 
@@ -447,6 +469,12 @@ Semua endpoint memakai prefix `/api` dan cookie sesi kecuali health/login.
 | Usage | `GET /usage` |
 | Orchestrator | `POST /orchestrator` |
 | Rekomendasi | `GET /recommendations` |
+| Jurnal | `GET/POST /journal`, `PATCH/DELETE /journal/{id}` |
+| Target | `GET/POST /goals`, `PATCH/DELETE /goals/{id}` |
+| Telegram | `POST /telegram/webhook` (publik, secret header), `GET /telegram/status`, `GET /telegram/links`, `PATCH /telegram/settings`, `POST /telegram/test`, `POST /telegram/set-webhook`, `POST /telegram/register`, `POST /telegram/outbox/flush`, `POST /telegram/maintenance/purge` |
+| Cron | `GET/POST /cron/tick` (Bearer `CRON_SECRET`) |
+
+Kekecualian auth: `/telegram/webhook` dilindungi secret header Telegram, dan `/cron/tick` dilindungi `Authorization: Bearer $CRON_SECRET`.
 
 ## Database dan migration
 
@@ -482,6 +510,8 @@ Migration saat ini:
 | `0026_provider_settings` | provider_keys terenkripsi |
 | `0027_token_usage_by_model` | rincian token per model |
 | `0028_image_usage` | image_usage_events |
+| `0029_automation_telegram` | telegram_links, telegram_updates, notification_outbox, automation_runs |
+| `0030_journal_goals` | journal_entries, goals |
 
 ## Testing dan verifikasi
 
@@ -535,7 +565,15 @@ Fluid compute). Streaming SSE didukung runtime Python Vercel.
   | `SUPABASE_SERVICE_ROLE_KEY` | service role key |
   | `CORS_ORIGINS` | `https://<frontend-domain>` |
   | `GROQ_API_KEY` atau kunci provider lain | opsional tapi disarankan |
+  | `CRON_SECRET` | string acak; dipakai Vercel Cron untuk `/api/cron/tick` |
+  | `TELEGRAM_ENABLED` | `true` untuk mengaktifkan bot |
+  | `TELEGRAM_BOT_TOKEN` | token bot |
+  | `TELEGRAM_WEBHOOK_SECRET` | string acak; dikirim Telegram di header |
+  | `TELEGRAM_ALLOWED_CHAT_IDS` | chat id yang diizinkan (opsional) |
 
+- `backend/vercel.json` juga mendaftarkan Cron harian `0 14 * * *` ke `/api/cron/tick` (21:00 WIB).
+
+- Setelah deploy, daftarkan webhook: `POST /api/telegram/set-webhook` dengan body `{"url": "https://<backend>/api/telegram/webhook"}` (butuh cookie sesi). Alternatif: `POST /api/telegram/test` untuk menguji kirim.
 - Catat URL hasil deploy, mis. `https://axtra-backend.vercel.app`.
 
 ### 2. Project frontend (Next.js)
@@ -557,16 +595,17 @@ menentukan tujuan rewrite, jadi harus diisi di Vercel (bukan hanya lokal).
 
 - Rate limiter dan `health_scheduler` berjalan **in-process**; pada Fluid compute
   beberapa instance dapat hidup bersamaan, sehingga batas rate bersifat
-  per-instance dan auto-refresh kesehatan proyek bersifat best-effort (tugas
-  setelah respons tidak dijamin selesai). Untuk jadwal yang andal, gunakan
-  Vercel Cron memanggil route API.
+  per-instance. Auto-refresh kesehatan proyek kini punya jaring pengaman lewat
+  cron `/api/cron/tick` yang menyapu proyek `health_stale`.
 - Endpoint `/docs` dimatikan saat `APP_ENV=production`.
 
 ## Batasan saat ini
 
 - Aplikasi masih **single-owner**, bukan multi-tenant.
-- Belum ada daily journal, goal tracking, AI mentor, laporan harian/mingguan.
-- Belum ada automation engine, scheduler persisten, retry queue, Telegram, atau web push.
+- Jurnal dan target bersifat minimal: tanpa UI web khusus, tanpa pengingat per-entri.
+- Belum ada AI mentor.
+- Automation berjalan lewat satu cron harian (`0 14 * * *` UTC). Di Vercel Hobby, laporan terkirim pada jam cron, bukan tepat pada `report_hour`.
+- Push notification PWA belum; notifikasi proaktif hanya lewat Telegram.
 - GitHub integration masih read-only untuk indexing repo; belum ada OAuth, commit, issue, atau PR write.
 - Vibe Coding tidak mengeksekusi kode dan tidak mengubah repo.
 - Generated Image bergantung pada kredit/provider eksternal; tidak ada model gambar gratis yang dijamin.
@@ -579,9 +618,9 @@ menentukan tujuan rewrite, jadi harus diisi di Vercel (bukan hanya lokal).
 | Phase | Isi | Status |
 |---|---|---|
 | 1 | Chat, streaming, memori, profil, auth | ✅ selesai |
-| 2 | Journal, target, proyek | 🟡 proyek, task, dokumen, repo, health selesai; journal/target belum |
-| 3 | AI Mentor, skill evidence, laporan | ⏳ belum |
-| 4 | Automation, Telegram, PWA push | ⏳ belum |
+| 2 | Journal, target, proyek | 🟡 proyek lengkap; journal/target minimal selesai |
+| 3 | AI Mentor, skill evidence, laporan | 🟡 laporan harian/mingguan selesai; AI Mentor belum |
+| 4 | Automation, Telegram, PWA push | 🟡 bot Telegram, cron, retry outbox selesai; PWA push belum |
 | 5 | GitHub + Vibe Coding | 🟡 Vibe Coding MVP selesai; GitHub write/OAuth belum |
 | 6 | Riset web, creator tools, image | 🟡 Riset Web + Generated Image selesai; creator content tools belum |
 | Lintas fase | Multi-provider, settings model teks/gambar, orchestrator beranda | ✅ selesai |

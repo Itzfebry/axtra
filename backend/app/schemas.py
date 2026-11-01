@@ -1016,3 +1016,105 @@ class VibeVerificationUpdate(BaseModel):
     status: VibeVerificationStatus
     evidence: str = Field(default="", max_length=20000)
     notes: str = Field(default="", max_length=5000)
+
+
+# ---------------------------------------------------------------------------
+# Daily journal + goals (Phase 2 completion, minimal)
+# ---------------------------------------------------------------------------
+class JournalEntryCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=20000)
+    mood: str = Field(default="", max_length=40)
+    tags: list[str] = Field(default_factory=list)
+    entry_date: date | None = None
+
+
+class JournalEntryUpdate(BaseModel):
+    content: str | None = Field(default=None, min_length=1, max_length=20000)
+    mood: str | None = Field(default=None, max_length=40)
+    tags: list[str] | None = None
+    entry_date: date | None = None
+
+
+class JournalEntryOut(BaseModel):
+    id: str
+    entry_date: date
+    content: str
+    mood: str = ""
+    tags: list[str] = Field(default_factory=list)
+    source: str = "web"
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+GoalStatus = Literal["active", "done", "archived"]
+
+
+class GoalCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    detail: str = Field(default="", max_length=5000)
+    target_date: date | None = None
+    progress: int = Field(default=0, ge=0, le=100)
+
+
+class GoalUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    detail: str | None = Field(default=None, max_length=5000)
+    status: GoalStatus | None = None
+    target_date: date | None = None
+    progress: int | None = Field(default=None, ge=0, le=100)
+
+
+class GoalOut(BaseModel):
+    id: str
+    title: str
+    detail: str = ""
+    status: GoalStatus = "active"
+    target_date: date | None = None
+    progress: int = 0
+    source: str = "web"
+    completed_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
+# Telegram + automation
+# ---------------------------------------------------------------------------
+class TelegramLinkOut(BaseModel):
+    chat_id: str
+    username: str = ""
+    first_name: str = ""
+    enabled: bool = True
+    default_mode: str = "general"
+    daily_report: bool = True
+    weekly_report: bool = True
+    report_hour: int = 21
+    quiet_start: int = 22
+    quiet_end: int = 7
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class TelegramSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    default_mode: ChatMode | None = None
+    daily_report: bool | None = None
+    weekly_report: bool | None = None
+    report_hour: int | None = Field(default=None, ge=0, le=23)
+    quiet_start: int | None = Field(default=None, ge=0, le=23)
+    quiet_end: int | None = Field(default=None, ge=0, le=23)
+
+
+class TelegramWebhookResult(BaseModel):
+    ok: bool = True
+    handled: bool = False
+    detail: str = ""
+
+
+class CronTickOut(BaseModel):
+    ok: bool = True
+    health_refreshed: int = 0
+    reports_sent: int = 0
+    outbox_sent: int = 0
+    outbox_failed: int = 0
+    detail: str = ""

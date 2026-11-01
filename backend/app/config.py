@@ -150,6 +150,26 @@ class Settings(BaseSettings):
     model_tpm_limit: int = 8000
     model_daily_token_limit: int = 200000
 
+    # Telegram bot (Phase 4). The bot is single-owner: only chat ids listed in
+    # ``telegram_allowed_chat_ids`` (or already linked in the DB) may interact.
+    # Empty token / disabled = webhook and polling do nothing.
+    telegram_enabled: bool = False
+    telegram_bot_token: str = ""
+    # Secret echoed back by Telegram in ``X-Telegram-Bot-Api-Secret-Token``.
+    telegram_webhook_secret: str = ""
+    # Comma-separated allowlist of chat ids. Empty means "only already-linked".
+    telegram_allowed_chat_ids: str = ""
+    telegram_default_mode: str = "general"
+
+    # Automation / cron. ``cron_secret`` protects the /api/cron/tick endpoint
+    # (Vercel sends it as ``Authorization: Bearer``). Daily report hour and
+    # quiet hours are in WIB; quiet hours suppress proactive notifications.
+    cron_secret: str = ""
+    automation_daily_report_hour: int = 21  # WIB
+    automation_weekly_report_hour: int = 20  # WIB (Sunday)
+    automation_quiet_start: int = 22  # WIB inclusive
+    automation_quiet_end: int = 7  # WIB exclusive
+
     @field_validator("memory_min_similarity", "memory_cluster_similarity", mode="before")
     @classmethod
     def _coerce_float(cls, value: object) -> object:
@@ -164,6 +184,10 @@ class Settings(BaseSettings):
     @property
     def groq_model_list(self) -> list[str]:
         return self._split(self.groq_chat_models)
+
+    @property
+    def telegram_allowed_list(self) -> list[str]:
+        return self._split(self.telegram_allowed_chat_ids)
 
     @staticmethod
     def _split(raw: str) -> list[str]:

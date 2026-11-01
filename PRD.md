@@ -50,11 +50,11 @@ Matriks status per 31 Oktober 2026:
 | Beranda orchestrator | ✅ | Perintah bahasa alami untuk navigasi, menu, tema, simpan memori |
 | Pemakaian token | ✅ | Meter token/menit + harian WIB, rincian per model |
 | PWA | 🟡 | Manifest + service worker shell; push notification belum |
-| Daily Journal | ⏳ | Belum ada |
-| Goal/target | ⏳ | Belum ada |
+| Daily Journal | ✅ | Jurnal harian minimal (DB + API; juga via Telegram `/jurnal`) |
+| Goal/target | ✅ | Target minimal + progress (DB + API; `/target`, `/selesai`) |
 | AI Mentor | ⏳ | Belum ada |
-| Automation / scheduler persisten | ⏳ | Belum ada |
-| Telegram / web push | ⏳ | Env disiapkan, worker belum |
+| Automation / scheduler persisten | 🟡 | Cron `/api/cron/tick` + retry outbox; penjadwalan fan-out 1×/hari |
+| Telegram / web push | 🟡 | Bot Telegram (webhook + polling) selesai; PWA push belum |
 | GitHub OAuth read/write | ⏳ | Saat ini hanya indexing repo lewat token env |
 
 ## 3. Target Platform dan Teknologi
@@ -186,11 +186,15 @@ Konten dari web dan file diperlakukan sebagai data tidak tepercaya, bukan instru
 
 ### 4.8 Automation Engine
 
-**Belum diimplementasikan.** Rencana: jadwal persisten, background worker, retry terbatas, notifikasi hasil, riwayat eksekusi, jeda/batal. Contoh: laporan harian 21.00 WIB, review mingguan Minggu 20.00 WIB, pengingat target. Background jobs harus persisten; tidak boleh bergantung pada timer frontend atau tab browser.
+**Sudah berjalan (sebagian).** Satu endpoint cron `GET|POST /api/cron/tick` (dijadwalkan Vercel Cron `0 14 * * *` UTC = 21.00 WIB) menjalankan semua tugas terjadwal tanpa worker persisten: menyapu proyek `health_stale` (`refresh_stale_projects`), membangun laporan harian dan review mingguan, serta menguras `notification_outbox`. Idempotensi per hari dijaga tabel `automation_runs` (`kind`, `day_key`). Cron dilindungi `Authorization: Bearer $CRON_SECRET`. Retry antrean notifikasi berjenjang (1, 5, 15, 60, 240 menit), maksimum 5 percobaan.
+
+Belum ada: penjadwalan lebih rapat dari 1×/hari, jeda/batal interaktif, dan riwayat eksekusi yang dapat dibuka dari UI.
 
 ### 4.9 Notifications
 
-**Belum diimplementasikan.** Rencana kanal: Telegram Bot dan Web Push PWA. Jenis: laporan, pengingat, status pekerjaan, kegagalan penting, rekomendasi, permintaan persetujuan. Harus menghormati preferensi, jam tenang, dan batas frekuensi.
+**Sudah berjalan (Telegram).** Bot Telegram single-owner menerima perintah (`/chat`, `/ingat`, `/memori`, `/gambar`, `/riset`, `/jobs`, `/jurnal`, `/target`, `/laporan`, `/pemakaian`, `/pengaturan`) dan mengirim notifikasi proaktif. Webhook divalidasi lewat header `X-Telegram-Bot-Api-Secret-Token`; update dideduplikasi di `telegram_updates`. Notifikasi proaktif masuk `notification_outbox` dan dihormati jam tenang (`quiet_start`/`quiet_end`).
+
+Belum ada: Web Push PWA, preferensi jenis notifikasi per pengguna, dan batas frekuensi lanjutan.
 
 ### 4.10 Generated Image
 
@@ -305,8 +309,8 @@ Proyek, dokumen, indeks repo, task, kesehatan AI, chat terkait **selesai**. Dail
 ### Phase 3 — AI Mentor ⏳
 Belum.
 
-### Phase 4 — Automation and Notifications ⏳
-Persistent job queue, scheduler, background worker, Telegram, PWA push, riwayat/retry **belum**.
+### Phase 4 — Automation and Notifications 🟡
+Bot Telegram (webhook + polling lokal), cron `/api/cron/tick`, laporan harian/mingguan, retry outbox, dan jurnal/target minimal **selesai**. PWA push dan worker persisten penuh **belum**.
 
 ### Phase 5 — GitHub and Vibecoding 🟡
 Vibe Coding MVP (discovery, tujuh artefak berversi, task planning, prompt handoff, verifikasi) **selesai**. GitHub read-only indexing repo **selesai**. GitHub OAuth/write dan eksekusi otonom **belum**.
@@ -327,9 +331,9 @@ Snapshot kondisi saat ini:
 4. ✅ Informasi personal disimpan sebagai memori dengan sumber dan waktu.
 5. ✅ Axtra mengambil memori relevan untuk menjawab.
 6. ✅ Pengguna dapat memeriksa, mengoreksi, dan menghapus memori.
-7. ⏳ Pengguna dapat mencatat aktivitas dan target harian (belum).
-8. ⏳ Menjalankan scheduled job persisten tanpa browser (belum).
-9. ⏳ Telegram menerima notifikasi hasil pekerjaan (belum).
+7. ✅ Pengguna dapat mencatat aktivitas dan target harian.
+8. ✅ Menjalankan scheduled job persisten tanpa browser (cron `/api/cron/tick` + `automation_runs`).
+9. 🟡 Telegram menerima notifikasi hasil pekerjaan (laporan & perintah Telegram selesai; push PWA belum).
 10. ✅ Error provider, rate limit, dan kegagalan tugas ditangani tanpa kehilangan data penting.
 11. ✅ Akses data personal dilindungi autentikasi.
 12. ✅ Batasan paket gratis dan status pekerjaan dapat diketahui pengguna (meter token, peringatan kredit).

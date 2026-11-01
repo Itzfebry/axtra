@@ -19,11 +19,13 @@ from app.routers import (
     chat,
     chat_settings,
     conversations,
+    cron,
     documents,
     feature_settings,
     health,
     images,
     jobs,
+    journal,
     memories,
     orchestrator,
     profile,
@@ -32,6 +34,7 @@ from app.routers import (
     recommendations,
     research,
     skills,
+    telegram,
     usage,
     vibe,
 )
@@ -119,6 +122,9 @@ def create_app() -> FastAPI:
     app.include_router(usage.router)
     app.include_router(providers.router)
     app.include_router(images.router)
+    app.include_router(journal.router)
+    app.include_router(telegram.router)
+    app.include_router(cron.router)
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
