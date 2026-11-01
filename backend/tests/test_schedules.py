@@ -186,3 +186,33 @@ def test_push_subscription_requires_keys() -> None:
         endpoint="https://example.com", keys={"p256dh": "a", "auth": "b"}
     )
     assert sub.keys["p256dh"] == "a"
+
+
+def test_push_disabled_without_vapid_keys() -> None:
+    import asyncio
+
+    from app.services.push_service import send_push
+
+    sent, failed, removed = asyncio.run(
+        send_push(None, _settings(), "user", title="t", body="b")  # type: ignore[arg-type]
+    )
+    assert (sent, failed, removed) == (0, 0, 0)
+
+
+def test_private_key_pem_unescapes_newlines() -> None:
+    from app.services.push_service import _private_key_pem
+
+    assert _private_key_pem(_settings(vapid_private_key="a\\nb")) == "a\nb"
+
+
+def test_vapid_pem_signs_claims() -> None:
+    from py_vapid import Vapid
+
+    vapid = Vapid()
+    vapid.generate_keys()
+    pem = vapid.private_pem().decode()
+    loaded = Vapid.from_pem(pem.encode())
+    headers = loaded.sign(
+        {"sub": "mailto:a@b.c", "aud": "https://push.example.com", "exp": 9999999999}
+    )
+    assert "Authorization" in headers

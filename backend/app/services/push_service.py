@@ -95,10 +95,15 @@ async def send_push(
     if not subscriptions:
         return 0, 0, 0
 
+    from py_vapid import Vapid
     from pywebpush import WebPushException, webpush
 
     payload = json.dumps({"title": title, "body": body, "url": url, "tag": tag})
-    pem = _private_key_pem(settings)
+    try:
+        vapid = Vapid.from_pem(_private_key_pem(settings).encode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - a bad key must not crash the cron
+        logger.warning("Invalid VAPID private key: %s", exc)
+        return 0, 0, 0
     claims = {"sub": settings.vapid_subject}
 
     sent = 0
@@ -110,7 +115,7 @@ async def send_push(
                 webpush,
                 _subscription_info(row),
                 data=payload,
-                vapid_private_key=pem,
+                vapid_private_key=vapid,
                 vapid_claims=dict(claims),
                 timeout=15,
             )
