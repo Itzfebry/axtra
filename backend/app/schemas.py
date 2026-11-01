@@ -664,6 +664,8 @@ ProjectTaskPriority = Literal["low", "medium", "high"]
 VibeArtifactKind = Literal[
     "PRD",
     "ARCHITECTURE",
+    "DATA_MODEL",
+    "API_SPEC",
     "ACCEPTANCE_TEST_PLAN",
     "UI_UX_SPEC",
     "AGENT_INSTRUCTIONS",
@@ -681,7 +683,11 @@ VibeDecisionStatus = Literal[
 VibeVerificationStatus = Literal[
     "TODO", "IN_PROGRESS", "BLOCKED", "NEEDS_REVIEW", "DONE"
 ]
-VibeStage = Literal["discovery", "specification", "planning", "verification"]
+VibeEntryMode = Literal["brownfield", "greenfield"]
+VibeFeatureScope = Literal["small", "medium", "large"]
+VibeStage = Literal[
+    "intake", "discovery", "specification", "planning", "verification"
+]
 
 
 class ProjectTaskCreate(BaseModel):
@@ -899,6 +905,10 @@ class VibeIdea(BaseModel):
 
 class VibeSessionCreate(VibeIdea):
     title: str = Field(default="", max_length=200)
+    entry_mode: VibeEntryMode = "greenfield"
+    template_key: str | None = Field(default=None, max_length=80)
+    tech_stack: list[str] = Field(default_factory=list, max_length=20)
+    request: str = Field(default="", max_length=8000)
 
 
 class VibeSessionUpdate(BaseModel):
@@ -907,8 +917,14 @@ class VibeSessionUpdate(BaseModel):
     problem: str | None = Field(default=None, max_length=4000)
     target_users: str | None = Field(default=None, max_length=2000)
     constraints: str | None = Field(default=None, max_length=4000)
+    request: str | None = Field(default=None, max_length=8000)
     summary: str | None = Field(default=None, max_length=8000)
     stage: VibeStage | None = None
+    template_key: str | None = Field(default=None, max_length=80)
+    feature_scope: VibeFeatureScope | None = None
+    required_artifacts: list[VibeArtifactKind] | None = None
+    baseline_commit: str | None = Field(default=None, max_length=200)
+    baseline_indexed_at: datetime | None = None
 
 
 class VibeSessionOut(BaseModel):
@@ -918,6 +934,12 @@ class VibeSessionOut(BaseModel):
     raw_idea: dict[str, Any] = Field(default_factory=dict)
     stage: VibeStage = "discovery"
     summary: str = ""
+    entry_mode: VibeEntryMode = "greenfield"
+    template_key: str | None = None
+    feature_scope: VibeFeatureScope | None = None
+    required_artifacts: list[VibeArtifactKind] = Field(default_factory=list)
+    baseline_commit: str | None = None
+    baseline_indexed_at: datetime | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -1006,6 +1028,57 @@ class VibeArtifactVersionOut(BaseModel):
     status: VibeArtifactStatus = "DRAFT"
     note: str = ""
     created_at: datetime | None = None
+
+
+class VibeTemplateOut(BaseModel):
+    key: str
+    label: str
+    description: str = ""
+    artifact_kinds: list[VibeArtifactKind] = Field(default_factory=list)
+    tech_stack_options: list[str] = Field(default_factory=list)
+    file_conventions: list[str] = Field(default_factory=list)
+    seed_docs: dict[str, str] = Field(default_factory=dict)
+
+
+class VibeTemplateCatalogOut(BaseModel):
+    templates: list[VibeTemplateOut] = Field(default_factory=list)
+    scopes: list[VibeFeatureScope] = Field(default_factory=list)
+    artifact_kinds: list[VibeArtifactKind] = Field(default_factory=list)
+
+
+class VibeIntakeAnalyzeOut(BaseModel):
+    entry_mode: VibeEntryMode
+    analysis: str = ""
+    template: VibeTemplateOut | None = None
+    baseline_indexed_at: datetime | None = None
+
+
+class VibeIntakeClassifyOut(BaseModel):
+    scope: VibeFeatureScope
+    touches_data_api: bool = False
+    required_artifacts: list[VibeArtifactKind] = Field(default_factory=list)
+    rationale: str = ""
+
+
+class VibeIntakeConfirm(BaseModel):
+    scope: VibeFeatureScope
+    touches_data_api: bool = False
+
+
+class VibePlanItemOut(BaseModel):
+    kind: VibeArtifactKind
+    title: str = ""
+    required: bool = False
+    status: VibeArtifactStatus | None = None
+    version: int = 0
+
+
+class VibePlanOut(BaseModel):
+    session_id: str
+    entry_mode: VibeEntryMode
+    feature_scope: VibeFeatureScope | None = None
+    required_artifacts: list[VibeArtifactKind] = Field(default_factory=list)
+    items: list[VibePlanItemOut] = Field(default_factory=list)
 
 
 class VibeTaskGenerateRequest(BaseModel):

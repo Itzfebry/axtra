@@ -1255,6 +1255,8 @@ export async function* streamChat(
 export type VibeArtifactKind =
   | "PRD"
   | "ARCHITECTURE"
+  | "DATA_MODEL"
+  | "API_SPEC"
   | "ACCEPTANCE_TEST_PLAN"
   | "UI_UX_SPEC"
   | "AGENT_INSTRUCTIONS"
@@ -1277,7 +1279,16 @@ export type VibeVerificationStatus =
   | "NEEDS_REVIEW"
   | "DONE";
 
-export type VibeStage = "discovery" | "specification" | "planning" | "verification";
+export type VibeStage =
+  | "intake"
+  | "discovery"
+  | "specification"
+  | "planning"
+  | "verification";
+
+export type VibeEntryMode = "brownfield" | "greenfield";
+
+export type VibeFeatureScope = "small" | "medium" | "large";
 
 export type VibeIdea = {
   idea: string;
@@ -1290,11 +1301,63 @@ export type VibeSession = {
   id: string;
   project_id: string;
   title: string;
-  raw_idea: Partial<VibeIdea>;
+  raw_idea: Partial<VibeIdea> & { request?: string };
   stage: VibeStage;
   summary: string;
+  entry_mode: VibeEntryMode;
+  template_key: string | null;
+  feature_scope: VibeFeatureScope | null;
+  required_artifacts: VibeArtifactKind[];
+  baseline_commit: string | null;
+  baseline_indexed_at: string | null;
   created_at: string | null;
   updated_at: string | null;
+};
+
+export type VibeTemplate = {
+  key: string;
+  label: string;
+  description: string;
+  artifact_kinds: VibeArtifactKind[];
+  tech_stack_options: string[];
+  file_conventions: string[];
+  seed_docs: Record<string, string>;
+};
+
+export type VibeTemplateCatalog = {
+  templates: VibeTemplate[];
+  scopes: VibeFeatureScope[];
+  artifact_kinds: VibeArtifactKind[];
+};
+
+export type VibeIntakeAnalysis = {
+  entry_mode: VibeEntryMode;
+  analysis: string;
+  template: VibeTemplate | null;
+  baseline_indexed_at: string | null;
+};
+
+export type VibeIntakeClassification = {
+  scope: VibeFeatureScope;
+  touches_data_api: boolean;
+  required_artifacts: VibeArtifactKind[];
+  rationale: string;
+};
+
+export type VibePlanItem = {
+  kind: VibeArtifactKind;
+  title: string;
+  required: boolean;
+  status: VibeArtifactStatus | null;
+  version: number;
+};
+
+export type VibePlan = {
+  session_id: string;
+  entry_mode: VibeEntryMode;
+  feature_scope: VibeFeatureScope | null;
+  required_artifacts: VibeArtifactKind[];
+  items: VibePlanItem[];
 };
 
 export type VibeQuestion = {
@@ -1367,7 +1430,13 @@ export async function listVibeSessions(projectId: string): Promise<VibeSession[]
 
 export async function createVibeSession(
   projectId: string,
-  input: VibeIdea & { title?: string },
+  input: VibeIdea & {
+    title?: string;
+    entry_mode?: VibeEntryMode;
+    template_key?: string | null;
+    tech_stack?: string[];
+    request?: string;
+  },
 ): Promise<VibeSession> {
   return apiFetch<VibeSession>(vibePath(projectId), {
     method: "POST",
@@ -1385,12 +1454,66 @@ export async function getVibeSession(
 export async function updateVibeSession(
   projectId: string,
   sessionId: string,
-  patch: Partial<VibeIdea> & { title?: string; summary?: string; stage?: VibeStage },
+  patch: Partial<VibeIdea> & {
+    title?: string;
+    summary?: string;
+    stage?: VibeStage;
+    request?: string;
+    template_key?: string | null;
+    feature_scope?: VibeFeatureScope | null;
+    required_artifacts?: VibeArtifactKind[];
+  },
 ): Promise<VibeSession> {
   return apiFetch<VibeSession>(vibePath(projectId, sessionId), {
     method: "PATCH",
     body: JSON.stringify(patch),
   });
+}
+
+export async function listVibeTemplates(): Promise<VibeTemplateCatalog> {
+  return apiFetch<VibeTemplateCatalog>("/vibe/templates");
+}
+
+export async function analyzeVibeIntake(
+  projectId: string,
+  sessionId: string,
+): Promise<VibeIntakeAnalysis> {
+  return apiFetch<VibeIntakeAnalysis>(
+    `${vibePath(projectId, sessionId)}/intake/analyze`,
+    { method: "POST" },
+  );
+}
+
+export async function classifyVibeIntake(
+  projectId: string,
+  sessionId: string,
+): Promise<VibeIntakeClassification> {
+  return apiFetch<VibeIntakeClassification>(
+    `${vibePath(projectId, sessionId)}/intake/classify`,
+    { method: "POST" },
+  );
+}
+
+export async function getVibePlan(
+  projectId: string,
+  sessionId: string,
+): Promise<VibePlan> {
+  return apiFetch<VibePlan>(`${vibePath(projectId, sessionId)}/plan`);
+}
+
+export async function confirmVibeIntake(
+  projectId: string,
+  sessionId: string,
+  scope: VibeFeatureScope,
+  touchesDataApi: boolean,
+): Promise<VibeSession> {
+  return apiFetch<VibeSession>(
+    `${vibePath(projectId, sessionId)}/intake/confirm`,
+    {
+      method: "POST",
+      body: JSON.stringify({ scope, touches_data_api: touchesDataApi }),
+    },
+  );
 }
 
 export async function deleteVibeSession(

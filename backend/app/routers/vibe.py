@@ -27,8 +27,12 @@ from app.schemas import (
     VibeDecisionOut,
     VibeDecisionUpdate,
     VibeDiscoveryReply,
+    VibeIntakeAnalyzeOut,
+    VibeIntakeClassifyOut,
+    VibeIntakeConfirm,
     VibeMessageCreate,
     VibeMessageOut,
+    VibePlanOut,
     VibeSessionCreate,
     VibeSessionOut,
     VibeSessionUpdate,
@@ -38,7 +42,11 @@ from app.schemas import (
 )
 from app.services.feature_persona import load_feature_persona
 from app.services.project_service import ProjectService
-from app.services.vibe_service import VibeOutputError, VibeService
+from app.services.vibe_service import (
+    VibeIntakeError,
+    VibeOutputError,
+    VibeService,
+)
 
 logger = logging.getLogger("axtra.vibe")
 
@@ -107,6 +115,12 @@ def _bad_output(exc: VibeOutputError) -> HTTPException:
     )
 
 
+def _intake_error(exc: VibeIntakeError) -> HTTPException:
+    if exc.code == "repo_not_indexed":
+        return HTTPException(status.HTTP_409_CONFLICT, detail=str(exc))
+    return HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+
+
 async def _require_session(
     service: VibeService,
     user: CurrentUser,
@@ -157,6 +171,10 @@ async def create_session(
         problem=payload.problem,
         target_users=payload.target_users,
         constraints=payload.constraints,
+        entry_mode=payload.entry_mode,
+        template_key=payload.template_key,
+        tech_stack=payload.tech_stack,
+        request=payload.request,
     )
 
 
@@ -250,6 +268,93 @@ async def send_discovery_message(
     return VibeDiscoveryReply(
         message=message, decisions=decisions, questions=questions
     )
+
+
+# ---------------------------------------------------------------------------
+# Intake
+# ---------------------------------------------------------------------------
+@router.post(
+    "/sessions/{session_id}/intake/analyze",
+    response_model=VibeIntakeAnalyzeOut,
+)
+async def analyze_intake(
+    project_id: uuid.UUID,
+    session_id: uuid.UUID,
+    user: CurrentUser = Depends(rate_limit),
+) -> VibeIntakeAnalyzeOut:
+    service = await _service(user, str(project_id))
+    await _require_session(service, user, str(project_id), str(session_id))
+    try:
+        result = await service.analyze_intake(
+            user.id, str(project_id), str(session_id)
+        )
+    except VibeIntakeError as exc:
+        raise _intake_error(exc) from exc
+    except LLMProviderError as exc:
+        raise _llm_error(exc) from exc
+    except VibeOutputError as exc:
+        raise _bad_output(exc) from exc
+    return VibeIntakeAnalyzeOut(**result)
+
+
+@router.post(
+    "/sessions/{session_id}/intake/classify",
+    response_model=VibeIntakeClassifyOut,
+)
+async def classify_intake(
+    project_id: uuid.UUID,
+    session_id: uuid.UUID,
+    user: CurrentUser = Depends(rate_limit),
+) -> VibeIntakeClassifyOut:
+    service = await _service(user, str(project_id))
+    await _require_session(service, user, str(project_id), str(session_id))
+    try:
+        result = await service.classify_intake(
+            user.id, str(project_id), str(session_id)
+        )
+    except VibeIntakeError as exc:
+        raise _intake_error(exc) from exc
+    except LLMProviderError as exc:
+        raise _llm_error(exc) from exc
+    except VibeOutputError as exc:
+        raise _bad_output(exc) from exc
+    return VibeIntakeClassifyOut(**result)
+
+
+@router.post(
+    "/sessions/{session_id}/intake/confirm",
+    response_model=VibeSessionOut,
+)
+async def confirm_intake(
+    project_id: uuid.UUID,
+    session_id: uuid.UUID,
+    payload: VibeIntakeConfirm,
+    user: CurrentUser = Depends(rate_limit),
+) -> VibeSessionOut:
+    service = await _service(user, str(project_id))
+    await _require_session(service, user, str(project_id), str(session_id))
+    try:
+        return await service.confirm_intake(
+            user.id,
+            str(project_id),
+            str(session_id),
+            scope=payload.scope,
+            touches_data_api=payload.touches_data_api,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _not_found("Workspace tidak ditemukan.") from exc
+
+
+@router.get("/sessions/{session_id}/plan", response_model=VibePlanOut)
+async def get_plan(
+    project_id: uuid.UUID,
+    session_id: uuid.UUID,
+    user: CurrentUser = Depends(read_rate_limit),
+) -> VibePlanOut:
+    service = await _service(user, str(project_id))
+    await _require_session(service, user, str(project_id), str(session_id))
+    result = await service.get_plan(user.id, str(project_id), str(session_id))
+    return VibePlanOut(**result)
 
 
 # ---------------------------------------------------------------------------

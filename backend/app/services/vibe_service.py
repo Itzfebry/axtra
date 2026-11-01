@@ -39,28 +39,16 @@ from app.schemas import (
     VibeVerificationStatus,
 )
 from app.services.project_service import _row_to_project, _row_to_task
+from app.services.usage_service import record_usage
+from app.vibe_templates import (
+    ARTIFACT_KINDS,
+    ARTIFACT_TITLES,
+    get_template,
+    resolve_required_artifacts,
+)
 
 logger = logging.getLogger("axtra.vibe")
 
-ARTIFACT_KINDS: tuple[VibeArtifactKind, ...] = (
-    "PRD",
-    "ARCHITECTURE",
-    "ACCEPTANCE_TEST_PLAN",
-    "UI_UX_SPEC",
-    "AGENT_INSTRUCTIONS",
-    "IMPLEMENTATION_PLAN",
-    "DEFINITION_OF_DONE",
-)
-
-ARTIFACT_TITLES: dict[VibeArtifactKind, str] = {
-    "PRD": "Product Requirements Document",
-    "ARCHITECTURE": "Arsitektur & Desain Teknis",
-    "ACCEPTANCE_TEST_PLAN": "Rencana Pengujian & Acceptance",
-    "UI_UX_SPEC": "Spesifikasi UI/UX",
-    "AGENT_INSTRUCTIONS": "Instruksi Agen Coding",
-    "IMPLEMENTATION_PLAN": "Rencana Implementasi",
-    "DEFINITION_OF_DONE": "Definition of Done",
-}
 
 _ARTIFACT_GUIDE: dict[VibeArtifactKind, str] = {
     "PRD": (
@@ -73,6 +61,16 @@ _ARTIFACT_GUIDE: dict[VibeArtifactKind, str] = {
         "Tulis spesifikasi arsitektur Markdown: technology stack, komponen/sistem, "
         "modul, data model, API contracts, security, integrations, deployment, "
         "dan technical trade-offs. Sebutkan alternatif yang ditolak bila relevan."
+    ),
+    "DATA_MODEL": (
+        "Tulis model data Markdown: entitas/tabel, kolom dan tipe, primary/foreign "
+        "key, relasi, index, constraint, enum, migrasi, dan aturan integritas. "
+        "Sertakan diagram relasi dalam teks bila membantu."
+    ),
+    "API_SPEC": (
+        "Tulis spesifikasi API Markdown: daftar endpoint, method, path, auth, "
+        "request/response schema, status code, validasi, paginasi, error format, "
+        "dan contoh payload. Tandai endpoint yang butuh autentikasi."
     ),
     "ACCEPTANCE_TEST_PLAN": (
         "Tulis rencana pengujian Markdown yang ditautkan ke requirement: acceptance "
@@ -99,6 +97,23 @@ _ARTIFACT_GUIDE: dict[VibeArtifactKind, str] = {
         "test relevan, lint, type checking, build validation, security checks, "
         "documentation updates, dan pelaporan berbasis bukti."
     ),
+}
+
+# Which artifact kinds a decision category can invalidate. Unknown categories
+# fall back to "all kinds" so a change is never silently ignored.
+_DECISION_ARTIFACTS: dict[str, tuple[VibeArtifactKind, ...]] = {
+    "product": ("PRD",),
+    "users": ("PRD",),
+    "features": ("PRD", "IMPLEMENTATION_PLAN"),
+    "business": ("PRD",),
+    "cost": ("PRD", "ARCHITECTURE"),
+    "data": ("DATA_MODEL", "API_SPEC"),
+    "architecture": ("ARCHITECTURE",),
+    "security": ("ARCHITECTURE", "AGENT_INSTRUCTIONS"),
+    "uiux": ("UI_UX_SPEC",),
+    "testing": ("ACCEPTANCE_TEST_PLAN", "DEFINITION_OF_DONE"),
+    "performance": ("ARCHITECTURE",),
+    "deployment": ("ARCHITECTURE", "DEFINITION_OF_DONE"),
 }
 
 _DISCOVERY_SYSTEM = """\
@@ -164,6 +179,33 @@ didukung konteks.
 - Jangan menyertakan rahasia atau kredensial.
 """
 
+_ANALYZE_SYSTEM = """\
+Kamu adalah analis teknis senior. Berdasarkan data proyek yang sudah ada, tulis \
+analisa singkat dalam Bahasa Indonesia, format Markdown, maksimal 220 kata, \
+dengan bagian: Ringkasan, Kekuatan, Risiko, Area yang relevan untuk perubahan. \
+Gunakan hanya fakta dari data; jangan mengarang fitur atau file. Tandai asumsi \
+dengan "Asumsi:". Jangan menulis kalimat pembuka basa-basi.
+"""
+
+_CLASSIFY_SYSTEM = """\
+Kamu adalah product engineer yang menilai ukuran sebuah perubahan fitur. \
+Bahasa: Bahasa Indonesia.
+
+Balas HANYA JSON valid dengan bentuk:
+{
+  "scope": "small|medium|large",
+  "touches_data_api": true,
+  "rationale": "alasan singkat 1-3 kalimat"
+}
+
+Panduan:
+- small: perubahan terbatas, satu modul, tanpa perubahan skema/API.
+- medium: beberapa modul, mungkin menambah endpoint atau kolom.
+- large: lintas sistem, perubahan skema/API besar, atau fitur baru menyeluruh.
+- touches_data_api = true bila perubahan menyentuh model data atau kontrak API.
+Gunakan hanya konteks yang diberikan.
+"""
+
 _ARTIFACT_COMMON = """\
 Gunakan hanya fakta dari konteks di bawah. Jangan mengarang fitur atau bukti. \
 Tandai asumsi dengan kata "Asumsi:" dan hal yang perlu diverifikasi dengan \
@@ -176,6 +218,19 @@ _JSON_BLOCK = re.compile(r"```(?:json)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 
 class VibeOutputError(ValueError):
     """Raised when the model returns malformed structured data."""
+
+
+class VibeIntakeError(ValueError):
+    """Raised when the intake step cannot proceed.
+
+    ``code`` lets the router map the failure to a specific HTTP status/message:
+    - ``repo_not_indexed``: brownfield project needs repo indexing first
+    - ``template_required``: greenfield session is missing a valid template
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +270,12 @@ class _TaskPayload(BaseModel):
 
 class _TaskListPayload(BaseModel):
     tasks: list[_TaskPayload] = Field(default_factory=list, max_length=20)
+
+
+class _ClassifyPayload(BaseModel):
+    scope: str = Field(default="medium", max_length=20)
+    touches_data_api: bool = False
+    rationale: str = Field(default="", max_length=2000)
 
 
 def _balanced_object(text: str) -> str | None:
@@ -305,6 +366,9 @@ def _string_list(value: Any, limit: int = 30) -> list[str]:
 
 def _row_to_session(row: dict[str, Any]) -> VibeSessionOut:
     raw = row.get("raw_idea")
+    raw_artifacts = row.get("required_artifacts")
+    if not isinstance(raw_artifacts, list):
+        raw_artifacts = []
     return VibeSessionOut(
         id=row["id"],
         project_id=row["project_id"],
@@ -312,6 +376,12 @@ def _row_to_session(row: dict[str, Any]) -> VibeSessionOut:
         raw_idea=raw if isinstance(raw, dict) else {},
         stage=row.get("stage", "discovery") or "discovery",
         summary=row.get("summary", "") or "",
+        entry_mode=row.get("entry_mode", "greenfield") or "greenfield",
+        template_key=row.get("template_key"),
+        feature_scope=row.get("feature_scope"),
+        required_artifacts=raw_artifacts,
+        baseline_commit=row.get("baseline_commit"),
+        baseline_indexed_at=row.get("baseline_indexed_at"),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
     )
@@ -392,7 +462,9 @@ class VibeService:
     def _system(self, base: str) -> str:
         return f"{base}\n\n{self._persona}" if self._persona else base
 
-    async def _complete(self, request: ChatRequest) -> tuple[str, dict | None]:
+    async def _complete(
+        self, request: ChatRequest, user_id: str, *, source: str = "vibe"
+    ) -> tuple[str, dict | None]:
         if self._llm is None:
             raise LLMProviderError("GROQ_API_KEY is not configured.")
         # Groq enforces a per-minute token budget; a 429 tells us exactly how
@@ -400,7 +472,7 @@ class VibeService:
         # instead of surfacing a hard failure to the user.
         for attempt in range(3):
             try:
-                return await self._llm.complete(request)
+                answer, meta = await self._llm.complete(request)
             except LLMProviderError as exc:
                 delay = _rate_limit_delay(str(exc))
                 if delay is None or attempt == 2:
@@ -409,6 +481,15 @@ class VibeService:
                     "LLM rate limited (attempt %s); retrying in %.1fs", attempt + 1, delay
                 )
                 await asyncio.sleep(delay)
+                continue
+            await record_usage(
+                self._client,
+                user_id,
+                request.model,
+                (meta or {}).get("usage"),
+                source=source,
+            )
+            return answer, meta
         raise LLMProviderError("LLM request failed.")
 
     # --------------------------------------------------------------- projects
@@ -487,30 +568,60 @@ class VibeService:
         problem: str,
         target_users: str,
         constraints: str,
+        entry_mode: str | None = None,
+        template_key: str | None = None,
+        tech_stack: list[str] | None = None,
+        request: str = "",
     ) -> VibeSessionOut:
-        payload = {
+        raw_idea = {
+            "idea": idea.strip(),
+            "problem": problem.strip(),
+            "target_users": target_users.strip(),
+            "constraints": constraints.strip(),
+        }
+        if request.strip():
+            raw_idea["request"] = request.strip()
+        payload: dict[str, Any] = {
             "project_id": project_id,
             "user_id": user_id,
             "title": (title or idea.strip()[:80] or "Ide baru")[:200],
-            "raw_idea": {
-                "idea": idea.strip(),
-                "problem": problem.strip(),
-                "target_users": target_users.strip(),
-                "constraints": constraints.strip(),
-            },
+            "raw_idea": raw_idea,
             "stage": "discovery",
         }
+        # Passing entry_mode explicitly opts into the intake stage; callers that
+        # omit it keep the legacy discovery-first behaviour.
+        if entry_mode is not None:
+            payload["entry_mode"] = entry_mode
+            payload["stage"] = "intake"
+            if template_key:
+                payload["template_key"] = template_key
         response = (
             await self._client.table("vibe_sessions").insert(payload).execute()
         )
+        if tech_stack:
+            await self._set_project_tech_stack(project_id, user_id, tech_stack)
         return _row_to_session(response.data[0])
+
+    async def _set_project_tech_stack(
+        self, project_id: str, user_id: str, tech_stack: list[str]
+    ) -> None:
+        cleaned = [str(item).strip()[:80] for item in tech_stack if str(item).strip()]
+        if not cleaned:
+            return
+        await (
+            self._client.table("projects")
+            .update({"tech_stack": cleaned[:20]})
+            .eq("id", project_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
 
     async def update_session(
         self, user_id: str, project_id: str, session_id: str, patch: dict[str, Any]
     ) -> VibeSessionOut:
         current = await self.get_session(user_id, project_id, session_id)
         clean: dict[str, Any] = {}
-        for key in ("title", "idea", "problem", "target_users", "constraints"):
+        for key in ("title", "idea", "problem", "target_users", "constraints", "request"):
             value = patch.get(key)
             if value is None:
                 continue
@@ -524,6 +635,18 @@ class VibeService:
             clean["summary"] = str(patch["summary"]).strip()[:8000]
         if patch.get("stage") is not None:
             clean["stage"] = patch["stage"]
+        if patch.get("entry_mode") is not None:
+            clean["entry_mode"] = patch["entry_mode"]
+        if patch.get("template_key") is not None:
+            clean["template_key"] = patch["template_key"]
+        if patch.get("feature_scope") is not None:
+            clean["feature_scope"] = patch["feature_scope"]
+        if patch.get("required_artifacts") is not None:
+            clean["required_artifacts"] = list(patch["required_artifacts"])
+        if patch.get("baseline_commit") is not None:
+            clean["baseline_commit"] = str(patch["baseline_commit"]).strip()[:200]
+        if patch.get("baseline_indexed_at") is not None:
+            clean["baseline_indexed_at"] = patch["baseline_indexed_at"]
         if not clean:
             return current
         response = (
@@ -640,7 +763,7 @@ class VibeService:
             .single()
             .execute()
         )
-        previous_status = current.data.get("status") if current.data else None
+        previous = dict(current.data) if current.data else {}
         clean = {key: value for key, value in patch.items() if value is not None}
         if not clean:
             return _row_to_decision(current.data)
@@ -653,13 +776,17 @@ class VibeService:
         )
         if not response.data:
             raise KeyError("decision_not_found")
-        # A changed decision invalidates approved documents that may depend on it.
-        if (
-            "status" in clean
-            and previous_status
-            and clean["status"] != previous_status
-        ):
-            await self._mark_session_artifacts_stale(session_id)
+        # Any material change to a decision (status, statement, rationale, or
+        # category) can invalidate documents that depend on it. Only the kinds
+        # tied to the category are marked, so unrelated documents stay approved.
+        material = any(
+            key in clean and clean[key] != previous.get(key)
+            for key in ("status", "statement", "rationale", "category")
+        )
+        if material:
+            category = str(clean.get("category") or previous.get("category") or "")
+            kinds = _DECISION_ARTIFACTS.get(category.lower())
+            await self._mark_session_artifacts_stale(session_id, kinds)
         return _row_to_decision(response.data[0])
 
     async def delete_decision(self, session_id: str, decision_id: str) -> None:
@@ -671,15 +798,19 @@ class VibeService:
             .execute()
         )
 
-    async def _mark_session_artifacts_stale(self, session_id: str) -> None:
+    async def _mark_session_artifacts_stale(
+        self, session_id: str, kinds: tuple[VibeArtifactKind, ...] | None = None
+    ) -> None:
         try:
-            await (
+            query = (
                 self._client.table("vibe_artifacts")
                 .update({"status": "STALE"})
                 .eq("session_id", session_id)
                 .in_("status", ["APPROVED", "NEEDS_REVIEW"])
-                .execute()
             )
+            if kinds:
+                query = query.in_("kind", list(kinds))
+            await query.execute()
         except Exception:  # noqa: BLE001 - staleness is best-effort
             logger.warning("Failed to mark vibe artifacts stale for %s", session_id)
 
@@ -710,7 +841,8 @@ class VibeService:
                 temperature=0.4,
                 max_tokens=2200,
                 stream=False,
-            )
+            ),
+            user_id,
         )
         if not (answer or "").strip():
             raise VibeOutputError("Model mengembalikan jawaban kosong.")
@@ -766,6 +898,194 @@ class VibeService:
             user_id, project_id, session_id, {"stage": "discovery"}
         )
         return message, created, questions
+
+    # ---------------------------------------------------------------- intake
+    async def _load_project_tasks(self, project_id: str) -> list[ProjectTaskOut]:
+        response = (
+            await self._client.table("project_tasks")
+            .select("*")
+            .eq("project_id", project_id)
+            .order("position")
+            .execute()
+        )
+        return [_row_to_task(row) for row in response.data or []]
+
+    async def analyze_intake(
+        self, user_id: str, project_id: str, session_id: str
+    ) -> dict[str, Any]:
+        """Ground a session in its source before discovery.
+
+        Brownfield: requires an indexed repo, then writes a project analysis to
+        the session and snapshots the index time as the baseline. Greenfield:
+        returns the chosen template so the UI can present its document set.
+        """
+        session = await self.get_session(user_id, project_id, session_id)
+        if session.entry_mode == "greenfield":
+            template = get_template(session.template_key)
+            if template is None:
+                raise VibeIntakeError(
+                    "template_required",
+                    "Pilih template lebih dulu untuk proyek baru.",
+                )
+            return {
+                "entry_mode": "greenfield",
+                "analysis": "",
+                "template": template,
+                "baseline_indexed_at": None,
+            }
+
+        project = await self._load_project(user_id, project_id)
+        if project.repo_index_status != "ready":
+            raise VibeIntakeError(
+                "repo_not_indexed",
+                "Repo belum terindeks. Jalankan indeks repo sebelum analisa.",
+            )
+        documents = await self._load_documents(project_id)
+        tasks = await self._load_project_tasks(project_id)
+        context = self._brownfield_context(session, project, documents, tasks)
+        answer, _ = await self._complete(
+            ChatRequest(
+                messages=[
+                    ChatMessage(role="system", content=self._system(_ANALYZE_SYSTEM)),
+                    ChatMessage(role="user", content=_join_context([context], 8000)),
+                ],
+                model=self._model,
+                temperature=0.3,
+                max_tokens=1400,
+                stream=False,
+            ),
+            user_id,
+        )
+        analysis = _strip_fence((answer or "").strip())
+        if not analysis:
+            raise VibeOutputError("Model mengembalikan analisa kosong.")
+        await self.update_session(
+            user_id,
+            project_id,
+            session_id,
+            {
+                "summary": analysis,
+                "baseline_indexed_at": project.repo_indexed_at,
+                "stage": "intake",
+            },
+        )
+        return {
+            "entry_mode": "brownfield",
+            "analysis": analysis,
+            "template": None,
+            "baseline_indexed_at": project.repo_indexed_at,
+        }
+
+    async def classify_intake(
+        self, user_id: str, project_id: str, session_id: str
+    ) -> dict[str, Any]:
+        """Ask the model to propose a feature scope; the matrix decides docs.
+
+        Nothing is persisted here. The router returns the proposal so the user
+        can confirm or override it, then a PATCH stores ``feature_scope`` and
+        ``required_artifacts``.
+        """
+        session = await self.get_session(user_id, project_id, session_id)
+        project = await self._load_project(user_id, project_id)
+        documents = await self._load_documents(project_id)
+        template = get_template(session.template_key)
+        context = [
+            self._project_context(project, documents),
+            self._idea_context(session),
+        ]
+        if template:
+            context.append(
+                f"TEMPLATE: {template['label']} — {template['description']}\n"
+                "DOKUMEN BAWAAN TEMPLATE:\n"
+                + "\n".join(f"- {kind}" for kind in template["artifact_kinds"])
+            )
+        answer, _ = await self._complete(
+            ChatRequest(
+                messages=[
+                    ChatMessage(role="system", content=self._system(_CLASSIFY_SYSTEM)),
+                    ChatMessage(role="user", content=_join_context(context, 6000)),
+                ],
+                model=self._model,
+                temperature=0.2,
+                max_tokens=700,
+                stream=False,
+            ),
+            user_id,
+        )
+        parsed = _parse_json(answer)
+        if parsed is None:
+            raise VibeOutputError("Model tidak mengembalikan JSON klasifikasi yang valid.")
+        try:
+            payload = _ClassifyPayload.model_validate(parsed)
+        except ValidationError as exc:
+            raise VibeOutputError("Struktur JSON klasifikasi tidak valid.") from exc
+        scope = payload.scope if payload.scope in ("small", "medium", "large") else "medium"
+        required = resolve_required_artifacts(
+            entry_mode=session.entry_mode,
+            scope=scope,
+            template_key=session.template_key,
+            touches_data_api=payload.touches_data_api,
+        )
+        return {
+            "scope": scope,
+            "touches_data_api": payload.touches_data_api,
+            "required_artifacts": required,
+            "rationale": payload.rationale.strip(),
+        }
+
+    async def confirm_intake(
+        self,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        *,
+        scope: str,
+        touches_data_api: bool,
+    ) -> VibeSessionOut:
+        """Persist the confirmed scope and let the matrix resolve the doc set."""
+        session = await self.get_session(user_id, project_id, session_id)
+        required = resolve_required_artifacts(
+            entry_mode=session.entry_mode,
+            scope=scope,
+            template_key=session.template_key,
+            touches_data_api=touches_data_api,
+        )
+        return await self.update_session(
+            user_id,
+            project_id,
+            session_id,
+            {
+                "feature_scope": scope,
+                "required_artifacts": required,
+                "stage": "discovery",
+            },
+        )
+
+    def _brownfield_context(
+        self,
+        session: VibeSessionOut,
+        project: ProjectOut,
+        documents: list[ProjectDocumentOut],
+        tasks: list[ProjectTaskOut],
+    ) -> str:
+        open_tasks = [task for task in tasks if task.status != "done"]
+        return "\n\n".join(
+            part
+            for part in [
+                self._project_context(project, documents),
+                self._idea_context(session),
+                "TUGAS PROYEK TERBUKA ("
+                + str(len(open_tasks))
+                + "):\n"
+                + (
+                    "\n".join(f"- [{t.priority}] {t.title}" for t in open_tasks[:15])
+                    or "(tidak ada)"
+                ),
+                "TUGAS: analisa kondisi proyek saat ini dan area yang relevan "
+                "untuk perubahan yang diminta pengguna.",
+            ]
+            if part
+        )
 
     # -------------------------------------------------------------- artifacts
     async def list_artifacts(self, session_id: str) -> list[VibeArtifactOut]:
@@ -825,6 +1145,11 @@ class VibeService:
         ]
         if instructions.strip():
             context.append(f"INSTRUKSI TAMBAHAN DARI PENGGUNA:\n{_clip(instructions, 4000)}")
+        if session.required_artifacts:
+            context.append(
+                "DOKUMEN YANG DIWAJIBKAN UNTUK SESI INI (jangan menambah dokumen lain):\n"
+                + "\n".join(f"- {kind}" for kind in session.required_artifacts)
+            )
         user_prompt = _join_context(context, 9000)
 
         # Documents need far more room than a single 3k response; oversized
@@ -854,7 +1179,8 @@ class VibeService:
                     temperature=0.35,
                     max_tokens=token_budget,
                     stream=False,
-                )
+                ),
+                user_id,
             )
             if not answer:
                 break
@@ -920,6 +1246,41 @@ class VibeService:
         )
 
     async def _save_new_version(
+        self,
+        user_id: str,
+        project_id: str,
+        session_id: str,
+        kind: VibeArtifactKind,
+        content: str,
+        *,
+        generated_by: str,
+        note: str,
+    ) -> VibeArtifactOut:
+        # A concurrent first save for the same kind can collide on the
+        # unique(session_id, kind) constraint: both attempts see no existing row
+        # and both try to insert. Retry once so the loser re-reads and updates.
+        for attempt in range(2):
+            try:
+                return await self._save_new_version_once(
+                    user_id,
+                    project_id,
+                    session_id,
+                    kind,
+                    content,
+                    generated_by=generated_by,
+                    note=note,
+                )
+            except Exception:  # noqa: BLE001 - retry once, then surface
+                if attempt == 1:
+                    raise
+                logger.info(
+                    "Retrying artifact save after conflict for %s/%s",
+                    session_id,
+                    kind,
+                )
+        raise RuntimeError("unreachable")
+
+    async def _save_new_version_once(
         self,
         user_id: str,
         project_id: str,
@@ -1033,7 +1394,44 @@ class VibeService:
         )
         return _row_to_artifact(response.data[0])
 
+    async def get_plan(
+        self, user_id: str, project_id: str, session_id: str
+    ) -> dict[str, Any]:
+        """Document plan for the UI: which kinds are required and their status.
+
+        When no explicit set has been confirmed yet, every canonical kind is
+        shown so nothing is hidden unexpectedly.
+        """
+        session = await self.get_session(user_id, project_id, session_id)
+        artifacts = await self.list_artifacts(session_id)
+        by_kind = {item.kind: item for item in artifacts}
+        required = session.required_artifacts or list(ARTIFACT_KINDS)
+        required_set = set(required)
+        items = []
+        for kind in ARTIFACT_KINDS:
+            artifact = by_kind.get(kind)
+            items.append(
+                {
+                    "kind": kind,
+                    "title": ARTIFACT_TITLES[kind],
+                    "required": kind in required_set,
+                    "status": artifact.status if artifact else None,
+                    "version": artifact.version if artifact else 0,
+                }
+            )
+        return {
+            "session_id": session_id,
+            "entry_mode": session.entry_mode,
+            "feature_scope": session.feature_scope,
+            "required_artifacts": [kind for kind in ARTIFACT_KINDS if kind in required_set],
+            "items": items,
+        }
+
     # ------------------------------------------------------------------ tasks
+    @staticmethod
+    def _scope_task_cap(scope: str | None) -> int:
+        return {"small": 4, "medium": 8, "large": 12}.get(scope or "", 8)
+
     async def list_session_tasks(self, session_id: str) -> list[ProjectTaskOut]:
         response = (
             await self._client.table("project_tasks")
@@ -1053,6 +1451,9 @@ class VibeService:
         max_tasks: int = 8,
     ) -> list[ProjectTaskOut]:
         session = await self.get_session(user_id, project_id, session_id)
+        # A confirmed feature scope caps planning: a small change should not
+        # spawn a dozen tasks.
+        max_tasks = min(max_tasks, self._scope_task_cap(session.feature_scope))
         project = await self._load_project(user_id, project_id)
         decisions = await self.list_decisions(session_id)
         documents = await self._load_documents(project_id)
@@ -1081,7 +1482,8 @@ class VibeService:
                 temperature=0.3,
                 max_tokens=4000,
                 stream=False,
-            )
+            ),
+            user_id,
         )
         parsed = _parse_json(answer)
         if parsed is None:

@@ -11,6 +11,8 @@ import type {
 export const VIBE_ARTIFACT_KINDS: VibeArtifactKind[] = [
   "PRD",
   "ARCHITECTURE",
+  "DATA_MODEL",
+  "API_SPEC",
   "ACCEPTANCE_TEST_PLAN",
   "UI_UX_SPEC",
   "AGENT_INSTRUCTIONS",
@@ -21,6 +23,8 @@ export const VIBE_ARTIFACT_KINDS: VibeArtifactKind[] = [
 export const VIBE_ARTIFACT_LABELS: Record<VibeArtifactKind, string> = {
   PRD: "PRD",
   ARCHITECTURE: "Arsitektur",
+  DATA_MODEL: "Model Data",
+  API_SPEC: "Spesifikasi API",
   ACCEPTANCE_TEST_PLAN: "Test Plan",
   UI_UX_SPEC: "UI/UX",
   AGENT_INSTRUCTIONS: "Instruksi Agen",
@@ -31,6 +35,8 @@ export const VIBE_ARTIFACT_LABELS: Record<VibeArtifactKind, string> = {
 export const VIBE_ARTIFACT_HINTS: Record<VibeArtifactKind, string> = {
   PRD: "Tujuan, pengguna, requirement, scope, risiko.",
   ARCHITECTURE: "Stack, modul, data model, API, keamanan.",
+  DATA_MODEL: "Tabel, kolom, relasi, index, migrasi.",
+  API_SPEC: "Endpoint, schema, status code, validasi.",
   ACCEPTANCE_TEST_PLAN: "Acceptance, happy/negative/edge case.",
   UI_UX_SPEC: "Layar, interaksi, state, aksesibilitas.",
   AGENT_INSTRUCTIONS: "Aturan repo, dependency, keamanan.",
@@ -78,6 +84,7 @@ export const VIBE_VERIFICATION_CLASSES: Record<VibeVerificationStatus, string> =
 };
 
 export const VIBE_STAGE_LABELS: Record<VibeStage, string> = {
+  intake: "Intake",
   discovery: "Discovery",
   specification: "Spesifikasi",
   planning: "Perencanaan",
@@ -85,6 +92,7 @@ export const VIBE_STAGE_LABELS: Record<VibeStage, string> = {
 };
 
 export const VIBE_STAGE_ORDER: VibeStage[] = [
+  "intake",
   "discovery",
   "specification",
   "planning",

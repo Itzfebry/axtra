@@ -11,8 +11,11 @@ import {
   deleteVibeSession,
   getProject,
   listVibeSessions,
+  listVibeTemplates,
   type Project,
+  type VibeEntryMode,
   type VibeSession,
+  type VibeTemplateCatalog,
 } from "@/lib/api";
 import { PROJECT_INPUT_CLASS, PROJECT_LABEL_CLASS } from "@/lib/projectMeta";
 import { VIBE_STAGE_LABELS } from "@/lib/vibeMeta";
@@ -23,6 +26,7 @@ const EMPTY_DRAFT = {
   problem: "",
   target_users: "",
   constraints: "",
+  request: "",
 };
 
 function formatWhen(value: string | null): string {
@@ -47,6 +51,10 @@ export default function VibeSessionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
+  const [entryMode, setEntryMode] = useState<VibeEntryMode>("greenfield");
+  const [templateKey, setTemplateKey] = useState("");
+  const [techStack, setTechStack] = useState<string[]>([]);
+  const [catalog, setCatalog] = useState<VibeTemplateCatalog | null>(null);
   const [saving, setSaving] = useState(false);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
@@ -54,12 +62,14 @@ export default function VibeSessionsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [projectData, sessionData] = await Promise.all([
+      const [projectData, sessionData, templateData] = await Promise.all([
         getProject(id),
         listVibeSessions(id),
+        listVibeTemplates().catch(() => null),
       ]);
       setProject(projectData);
       setSessions(sessionData ?? []);
+      setCatalog(templateData);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal memuat Vibe Coding.");
     } finally {
@@ -71,9 +81,21 @@ export default function VibeSessionsPage() {
     if (id) void load();
   }, [id, load]);
 
+  const selectedTemplate =
+    catalog?.templates.find((item) => item.key === templateKey) ?? null;
+
   async function create(event: React.FormEvent) {
     event.preventDefault();
     if (saving) return;
+    if (entryMode === "greenfield") {
+      if (!templateKey) {
+        setError("Pilih template untuk proyek baru.");
+        return;
+      }
+    } else if (!draft.request.trim() && !draft.title.trim()) {
+      setError("Tulis perubahan yang diinginkan atau judul workspace.");
+      return;
+    }
     if (!draft.idea.trim() && !draft.problem.trim() && !draft.title.trim()) return;
     setSaving(true);
     setError(null);
@@ -84,9 +106,15 @@ export default function VibeSessionsPage() {
         problem: draft.problem.trim(),
         target_users: draft.target_users.trim(),
         constraints: draft.constraints.trim(),
+        request: draft.request.trim(),
+        entry_mode: entryMode,
+        template_key: entryMode === "greenfield" ? templateKey : null,
+        tech_stack: entryMode === "greenfield" ? techStack : [],
       });
       setSessions((prev) => [session, ...prev]);
       setDraft(EMPTY_DRAFT);
+      setTemplateKey("");
+      setTechStack([]);
       setShowForm(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal membuat workspace.");
@@ -168,6 +196,111 @@ export default function VibeSessionsPage() {
                 minimal salah satu dari judul, ide, atau masalah.
               </p>
               <div>
+                <span className={labelClass}>Jenis proyek</span>
+                <div className="mt-1.5 flex gap-2">
+                  {(
+                    [
+                      ["greenfield", "Proyek baru"],
+                      ["brownfield", "Proyek sudah ada"],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setEntryMode(value)}
+                      className={`inline-flex h-9 items-center rounded-lg border px-3 text-[13px] transition-colors duration-150 ${
+                        entryMode === value
+                          ? "border-primary/50 bg-primary/5 text-primary"
+                          : "border-border text-muted hover:bg-surface-muted"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {entryMode === "greenfield" ? (
+                <div className="space-y-3">
+                  <div>
+                    <label className={labelClass} htmlFor="vibe-template">
+                      Template
+                    </label>
+                    <select
+                      id="vibe-template"
+                      value={templateKey}
+                      onChange={(event) => {
+                        setTemplateKey(event.target.value);
+                        setTechStack([]);
+                      }}
+                      className={`mt-1 ${inputClass}`}
+                    >
+                      <option value="">Pilih template...</option>
+                      {(catalog?.templates ?? []).map((template) => (
+                        <option key={template.key} value={template.key}>
+                          {template.label}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedTemplate && (
+                      <p className="mt-1 text-[12px] text-muted">
+                        {selectedTemplate.description} · Dokumen:{" "}
+                        {selectedTemplate.artifact_kinds.length}
+                      </p>
+                    )}
+                  </div>
+                  {selectedTemplate && (
+                    <div>
+                      <span className={labelClass}>Tech stack</span>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {selectedTemplate.tech_stack_options.map((option) => {
+                          const active = techStack.includes(option);
+                          return (
+                            <button
+                              key={option}
+                              type="button"
+                              onClick={() =>
+                                setTechStack((prev) =>
+                                  active
+                                    ? prev.filter((item) => item !== option)
+                                    : [...prev, option],
+                                )
+                              }
+                              className={`rounded-full border px-2.5 py-1 text-[12px] transition-colors duration-150 ${
+                                active
+                                  ? "border-primary/50 bg-primary/5 text-primary"
+                                  : "border-border text-muted hover:bg-surface-muted"
+                              }`}
+                            >
+                              {option}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className={labelClass} htmlFor="vibe-request">
+                    Perubahan yang diinginkan
+                  </label>
+                  <textarea
+                    id="vibe-request"
+                    value={draft.request}
+                    onChange={(event) =>
+                      setDraft((prev) => ({ ...prev, request: event.target.value }))
+                    }
+                    rows={3}
+                    placeholder="Contoh: tambah filter tanggal dan export CSV pada daftar transaksi."
+                    className={`mt-1 ${inputClass}`}
+                  />
+                  <p className="mt-1 text-[12px] text-muted">
+                    Axtra membaca ringkasan/analisa proyek dulu, lalu menyusun
+                    discovery dan dokumen yang relevan.
+                  </p>
+                </div>
+              )}
+              <div>
                 <label className={labelClass} htmlFor="vibe-title">
                   Judul workspace (opsional)
                 </label>
@@ -245,7 +378,12 @@ export default function VibeSessionsPage() {
                 type="submit"
                 disabled={
                   saving ||
-                  (!draft.idea.trim() && !draft.problem.trim() && !draft.title.trim())
+                  (entryMode === "greenfield"
+                    ? !templateKey ||
+                      (!draft.idea.trim() &&
+                        !draft.problem.trim() &&
+                        !draft.title.trim())
+                    : !draft.request.trim() && !draft.title.trim())
                 }
                 className="inline-flex h-9 items-center rounded-lg bg-white px-3 text-[13px] font-medium text-black transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
               >
@@ -301,7 +439,10 @@ export default function VibeSessionsPage() {
                       </button>
                     </div>
                     <p className="mt-1 line-clamp-3 whitespace-pre-wrap text-[13px] text-muted">
-                      {session.raw_idea.idea || session.raw_idea.problem || "Tanpa deskripsi."}
+                      {session.raw_idea.idea ||
+                        session.raw_idea.request ||
+                        session.raw_idea.problem ||
+                        "Tanpa deskripsi."}
                     </p>
                     <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
                       <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">

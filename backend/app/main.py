@@ -39,6 +39,7 @@ from app.routers import (
     telegram,
     usage,
     vibe,
+    vibe_templates,
 )
 
 logger = logging.getLogger("axtra")
@@ -117,6 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(memories.router)
     app.include_router(projects.router)
     app.include_router(vibe.router)
+    app.include_router(vibe_templates.router)
     app.include_router(jobs.router)
     app.include_router(research.router)
     app.include_router(recommendations.router)

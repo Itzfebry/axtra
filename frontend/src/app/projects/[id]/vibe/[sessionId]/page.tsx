@@ -23,13 +23,17 @@ import { AppShell } from "@/components/AppShell";
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Markdown } from "@/components/Markdown";
 import {
+  analyzeVibeIntake,
   approveVibeArtifact,
   buildVibeTaskPrompt,
+  classifyVibeIntake,
+  confirmVibeIntake,
   createVibeDecision,
   deleteVibeDecision,
   generateVibeArtifact,
   generateVibeTasks,
   getProject,
+  getVibePlan,
   getVibeSession,
   listVibeArtifactVersions,
   listVibeArtifacts,
@@ -48,7 +52,11 @@ import {
   type VibeArtifactVersion,
   type VibeDecision,
   type VibeDecisionStatus,
+  type VibeFeatureScope,
+  type VibeIntakeAnalysis,
+  type VibeIntakeClassification,
   type VibeMessage,
+  type VibePlan,
   type VibeSession,
   type VibeVerificationStatus,
 } from "@/lib/api";
@@ -69,14 +77,21 @@ import {
   VIBE_VERIFICATION_LABELS,
 } from "@/lib/vibeMeta";
 
-type Tab = "discovery" | "documents" | "plan" | "verify";
+type Tab = "intake" | "discovery" | "documents" | "plan" | "verify";
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: "intake", label: "Intake" },
   { id: "discovery", label: "Discovery" },
   { id: "documents", label: "Dokumen" },
   { id: "plan", label: "Rencana" },
   { id: "verify", label: "Verifikasi" },
 ];
+
+const SCOPE_LABELS: Record<VibeFeatureScope, string> = {
+  small: "Kecil",
+  medium: "Sedang",
+  large: "Besar",
+};
 
 const DECISION_STATUSES: VibeDecisionStatus[] = [
   "CONFIRMED",
@@ -126,6 +141,13 @@ export default function VibeWorkspacePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("discovery");
+
+  // Intake (brownfield grounding / greenfield template + scope confirmation)
+  const [plan, setPlan] = useState<VibePlan | null>(null);
+  const [intakeAnalysis, setIntakeAnalysis] = useState<VibeIntakeAnalysis | null>(null);
+  const [classification, setClassification] =
+    useState<VibeIntakeClassification | null>(null);
+  const [intakeBusy, setIntakeBusy] = useState<string | null>(null);
 
   // Discovery composer
   const [message, setMessage] = useState("");
@@ -229,6 +251,23 @@ export default function VibeWorkspacePage() {
   const approvedCount = artifacts.filter((item) => item.status === "APPROVED").length;
   const openTasks = tasks.filter((task) => task.verification_status !== "DONE").length;
 
+  const requiredKinds = useMemo(() => {
+    const required = new Set(plan?.required_artifacts ?? []);
+    return VIBE_ARTIFACT_KINDS.filter((kind) => required.has(kind));
+  }, [plan]);
+  const orderedKinds = useMemo(() => {
+    const required = new Set(plan?.required_artifacts ?? []);
+    if (required.size === 0) return VIBE_ARTIFACT_KINDS;
+    return [
+      ...VIBE_ARTIFACT_KINDS.filter((kind) => required.has(kind)),
+      ...VIBE_ARTIFACT_KINDS.filter((kind) => !required.has(kind)),
+    ];
+  }, [plan]);
+  const docCountLabel =
+    (plan?.required_artifacts?.length ?? 0) > 0
+      ? `${requiredKinds.filter((kind) => artifactByKind.get(kind)?.status === "APPROVED").length}/${plan?.required_artifacts.length} dokumen wajib`
+      : `${approvedCount}/7 dokumen disetujui`;
+
   const selectedOptions = useMemo(
     () => Object.values(optionSelections).flat(),
     [optionSelections],
@@ -255,14 +294,22 @@ export default function VibeWorkspacePage() {
     setLoading(true);
     setError(null);
     try {
-      const [projectData, sessionData, messageData, decisionData, artifactData, taskData] =
-        await Promise.all([
+      const [
+        projectData,
+        sessionData,
+        messageData,
+        decisionData,
+        artifactData,
+        taskData,
+        planData,
+      ] = await Promise.all([
           getProject(id),
           getVibeSession(id, sessionId),
           listVibeMessages(id, sessionId),
           listVibeDecisions(id, sessionId),
           listVibeArtifacts(id, sessionId),
           listVibeTasks(id, sessionId),
+          getVibePlan(id, sessionId).catch(() => null),
         ]);
       setProject(projectData);
       setSession(sessionData);
@@ -270,6 +317,8 @@ export default function VibeWorkspacePage() {
       setDecisions(decisionData ?? []);
       setArtifacts(artifactData ?? []);
       setTasks(taskData ?? []);
+      setPlan(planData);
+      if (sessionData.stage === "intake") setTab("intake");
       setVerifyDrafts(
         Object.fromEntries(
           (taskData ?? []).map((task) => [
@@ -306,6 +355,52 @@ export default function VibeWorkspacePage() {
     ]);
     setMessages(messageData ?? []);
     setDecisions(decisionData ?? []);
+  }
+
+  async function runIntakeAnalyze() {
+    setIntakeBusy("analyze");
+    setError(null);
+    try {
+      const result = await analyzeVibeIntake(id, sessionId);
+      setIntakeAnalysis(result);
+      setSession(await getVibeSession(id, sessionId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal menganalisa proyek.");
+    } finally {
+      setIntakeBusy(null);
+    }
+  }
+
+  async function runIntakeClassify() {
+    setIntakeBusy("classify");
+    setError(null);
+    try {
+      setClassification(await classifyVibeIntake(id, sessionId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal mengklasifikasi fitur.");
+    } finally {
+      setIntakeBusy(null);
+    }
+  }
+
+  async function confirmIntake(scope: VibeFeatureScope) {
+    setIntakeBusy("confirm");
+    setError(null);
+    try {
+      const updated = await confirmVibeIntake(
+        id,
+        sessionId,
+        scope,
+        classification?.touches_data_api ?? false,
+      );
+      setSession(updated);
+      setPlan(await getVibePlan(id, sessionId));
+      setTab("discovery");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal menyimpan pilihan.");
+    } finally {
+      setIntakeBusy(null);
+    }
   }
 
   async function sendMessage(event: React.FormEvent) {
@@ -617,7 +712,7 @@ export default function VibeWorkspacePage() {
                 <span className="rounded-full border border-border/70 bg-surface px-2 py-0.5">
                   {VIBE_STAGE_LABELS[session.stage]}
                 </span>
-                <span>{approvedCount}/7 dokumen disetujui</span>
+                <span>{docCountLabel}</span>
                 <span className="text-muted-3" aria-hidden>·</span>
                 <span>{decisions.length} keputusan</span>
                 <span className="text-muted-3" aria-hidden>·</span>
@@ -654,6 +749,158 @@ export default function VibeWorkspacePage() {
               </button>
             ))}
           </div>
+
+          {/* --------------------------------------------------------- intake */}
+          {tab === "intake" && session && (
+            <div className="mt-4 grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_19rem]">
+              <section className="overflow-hidden rounded-xl border border-border/70 bg-surface p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted">
+                    {session.entry_mode === "brownfield"
+                      ? "Proyek sudah ada"
+                      : "Proyek baru"}
+                  </span>
+                  {session.template_key && (
+                    <span className="rounded-full border border-primary/30 bg-primary/5 px-2 py-0.5 text-[11px] text-primary">
+                      {session.template_key}
+                    </span>
+                  )}
+                </div>
+
+                {session.entry_mode === "brownfield" ? (
+                  <div className="mt-3">
+                    <p className="text-[13px] font-medium">Analisa proyek</p>
+                    <p className="mt-1 text-[12px] text-muted">
+                      Axtra membaca ringkasan repo dan tugas terbuka sebelum menyusun
+                      discovery.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={intakeBusy === "analyze"}
+                      onClick={() => void runIntakeAnalyze()}
+                      className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] hover:bg-surface-muted disabled:opacity-40"
+                    >
+                      <Sparkles size={13} aria-hidden />
+                      {intakeBusy === "analyze" ? "Menganalisa..." : "Analisa proyek"}
+                    </button>
+                    {(intakeAnalysis?.analysis || session.summary) && (
+                      <div className="mt-3 rounded-lg border border-border/70 bg-surface-muted/30 p-3">
+                        <Markdown content={intakeAnalysis?.analysis || session.summary} />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-3">
+                    <p className="text-[13px] font-medium">Template proyek baru</p>
+                    <p className="mt-1 text-[12px] text-muted">
+                      Dokumen mengikuti template. Tidak ada kode yang dihasilkan —
+                      hanya spesifikasi dan prompt handoff.
+                    </p>
+                  </div>
+                )}
+
+                <div className="mt-5 border-t border-border/60 pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-[13px] font-medium">Ukuran fitur</p>
+                    {session.feature_scope && (
+                      <span className="rounded-full border border-emerald-500/40 px-2 py-0.5 text-[11px] text-emerald-500">
+                        {SCOPE_LABELS[session.feature_scope]}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1 text-[12px] text-muted">
+                    AI mengusulkan, matriks menentukan dokumen yang relevan, kamu
+                    mengonfirmasi.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={intakeBusy === "classify"}
+                    onClick={() => void runIntakeClassify()}
+                    className="mt-3 inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-3 text-[12px] hover:bg-surface-muted disabled:opacity-40"
+                  >
+                    <Sparkles size={13} aria-hidden />
+                    {intakeBusy === "classify" ? "Menilai..." : "Minta usulan AI"}
+                  </button>
+
+                  {classification && (
+                    <div className="mt-3 rounded-lg border border-border/70 bg-surface-muted/30 p-3">
+                      <p className="text-[12px]">
+                        Usulan:{" "}
+                        <span className="font-medium">
+                          {SCOPE_LABELS[classification.scope]}
+                        </span>
+                        {classification.touches_data_api && " · menyentuh data/API"}
+                      </p>
+                      {classification.rationale && (
+                        <p className="mt-1 text-[12px] text-muted">
+                          {classification.rationale}
+                        </p>
+                      )}
+                      <p className="mt-2 text-[11px] text-muted">
+                        Dokumen:{" "}
+                        {classification.required_artifacts
+                          .map((kind) => VIBE_ARTIFACT_LABELS[kind])
+                          .join(", ")}
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {(["small", "medium", "large"] as VibeFeatureScope[]).map(
+                      (scope) => (
+                        <button
+                          key={scope}
+                          type="button"
+                          disabled={intakeBusy === "confirm"}
+                          onClick={() => void confirmIntake(scope)}
+                          className={`inline-flex h-8 items-center rounded-lg border px-3 text-[12px] transition-colors duration-150 disabled:opacity-40 ${
+                            classification?.scope === scope
+                              ? "border-primary/50 bg-primary/5 text-primary"
+                              : "border-border hover:bg-surface-muted"
+                          }`}
+                        >
+                          {SCOPE_LABELS[scope]}
+                          {classification?.scope === scope && " (usulan)"}
+                        </button>
+                      ),
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              <aside className="rounded-xl border border-border/70 bg-surface p-3">
+                <p className="text-[12px] font-semibold">Dokumen sesi ini</p>
+                <ul className="mt-2 space-y-1.5">
+                  {(plan?.items ?? [])
+                    .filter((item) => item.required)
+                    .map((item) => (
+                      <li
+                        key={item.kind}
+                        className="flex items-center justify-between gap-2 text-[12px]"
+                      >
+                        <span className="text-muted">
+                          {VIBE_ARTIFACT_LABELS[item.kind]}
+                        </span>
+                        <span
+                          className={`rounded-full border px-1.5 py-0.5 text-[9px] ${
+                            item.status
+                              ? VIBE_ARTIFACT_STATUS_CLASSES[item.status]
+                              : "border-border text-muted"
+                          }`}
+                        >
+                          {item.status ?? "BELUM"}
+                        </span>
+                      </li>
+                    ))}
+                  {(plan?.items ?? []).every((item) => !item.required) && (
+                    <li className="text-[12px] text-muted">
+                      Belum ada dokumen wajib. Konfirmasi ukuran fitur.
+                    </li>
+                  )}
+                </ul>
+              </aside>
+            </div>
+          )}
 
           {/* ------------------------------------------------------ discovery */}
           {tab === "discovery" && (
@@ -968,8 +1215,9 @@ export default function VibeWorkspacePage() {
           {tab === "documents" && (
             <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-[18rem_minmax(0,1fr)]">
               <aside className="space-y-1">
-                {VIBE_ARTIFACT_KINDS.map((kind) => {
+                {orderedKinds.map((kind) => {
                   const artifact = artifactByKind.get(kind);
+                  const isRequired = requiredKinds.includes(kind);
                   return (
                     <button
                       key={kind}
@@ -982,8 +1230,13 @@ export default function VibeWorkspacePage() {
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[12px] font-medium">
+                        <span className="flex items-center gap-1.5 text-[12px] font-medium">
                           {VIBE_ARTIFACT_LABELS[kind]}
+                          {isRequired && (
+                            <span className="rounded-full border border-primary/30 bg-primary/5 px-1.5 py-0.5 text-[8px] text-primary">
+                              wajib
+                            </span>
+                          )}
                         </span>
                         <span
                           className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] ${

@@ -15,7 +15,11 @@ from fastapi import HTTPException
 from app.deps import CurrentUser
 from app.llm import ChatRequest, LLMProviderError, StreamChunk
 from app.routers.vibe import _service as vibe_router_service
-from app.services.vibe_service import VibeOutputError, VibeService
+from app.services.vibe_service import (
+    VibeIntakeError,
+    VibeOutputError,
+    VibeService,
+)
 from tests.fake_supabase import FakeClient
 
 USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -29,6 +33,7 @@ class FakeLLM:
     def __init__(self) -> None:
         self.answers: list[str] = []
         self.errors: list[Exception] = []
+        self.metas: list[dict | None] = []
         self.requests: list[ChatRequest] = []
 
     def stream_chat(self, request: ChatRequest):  # pragma: no cover - unused
@@ -41,7 +46,8 @@ class FakeLLM:
         self.requests.append(request)
         if self.errors:
             raise self.errors.pop(0)
-        return self.answers.pop(0), None
+        meta = self.metas.pop(0) if self.metas else None
+        return self.answers.pop(0), meta
 
 
 def make_client() -> FakeClient:
@@ -355,3 +361,273 @@ async def test_rate_limit_error_is_retried() -> None:
     message, _, _ = await service.discovery(USER_ID, PROJECT_ID, session_id, "Halo")
     assert "retry" in message.content
     assert len(llm.requests) == 2
+
+
+def _set_repo_ready(client: FakeClient) -> None:
+    row = client.table("projects").rows[0]
+    row["repo_index_status"] = "ready"
+    row["repo_indexed_at"] = "2026-11-01T00:00:00+00:00"
+    row["repo_summary"] = "Aplikasi task sederhana dengan router dan service."
+
+
+async def _make_intake_session(
+    service: VibeService, *, entry_mode: str, template_key: str | None = None
+) -> str:
+    session = await service.create_session(
+        USER_ID,
+        PROJECT_ID,
+        title="Ubah fitur",
+        idea="",
+        problem="",
+        target_users="",
+        constraints="",
+        entry_mode=entry_mode,
+        template_key=template_key,
+        request="Tambah filter pada daftar task.",
+    )
+    return session.id
+
+
+@pytest.mark.asyncio
+async def test_create_session_intake_mode_and_tech_stack() -> None:
+    client = make_client()
+    service = VibeService(client, FakeLLM(), "fake-model")
+    session = await service.create_session(
+        USER_ID,
+        PROJECT_ID,
+        title="Aplikasi baru",
+        idea="Landing page produk",
+        problem="",
+        target_users="",
+        constraints="",
+        entry_mode="greenfield",
+        template_key="landing-page",
+        tech_stack=["Next.js + TypeScript + Tailwind"],
+    )
+    assert session.stage == "intake"
+    assert session.entry_mode == "greenfield"
+    assert session.template_key == "landing-page"
+    # tech stack is written to the project, not the session
+    project_rows = client.table("projects").rows
+    assert project_rows[0]["tech_stack"] == ["Next.js + TypeScript + Tailwind"]
+
+
+@pytest.mark.asyncio
+async def test_analyze_intake_brownfield_requires_index() -> None:
+    client = make_client()
+    service = VibeService(client, FakeLLM(), "fake-model")
+    session_id = await _make_intake_session(service, entry_mode="brownfield")
+    with pytest.raises(VibeIntakeError) as exc:
+        await service.analyze_intake(USER_ID, PROJECT_ID, session_id)
+    assert exc.value.code == "repo_not_indexed"
+
+
+@pytest.mark.asyncio
+async def test_analyze_intake_brownfield_writes_summary_and_baseline() -> None:
+    client = make_client()
+    _set_repo_ready(client)
+    llm = FakeLLM()
+    llm.answers.append("## Ringkasan\nProyek sehat.")
+    service = VibeService(client, llm, "fake-model")
+    session_id = await _make_intake_session(service, entry_mode="brownfield")
+
+    result = await service.analyze_intake(USER_ID, PROJECT_ID, session_id)
+    assert result["entry_mode"] == "brownfield"
+    assert "Proyek sehat" in result["analysis"]
+    assert result["baseline_indexed_at"] is not None
+
+    stored = await service.get_session(USER_ID, PROJECT_ID, session_id)
+    assert "Proyek sehat" in stored.summary
+    assert stored.baseline_indexed_at is not None
+
+
+@pytest.mark.asyncio
+async def test_analyze_intake_greenfield_returns_template() -> None:
+    client = make_client()
+    service = VibeService(client, FakeLLM(), "fake-model")
+    session = await service.create_session(
+        USER_ID,
+        PROJECT_ID,
+        title="Baru",
+        idea="Chatbot",
+        problem="",
+        target_users="",
+        constraints="",
+        entry_mode="greenfield",
+        template_key="chatbot-rag",
+    )
+    result = await service.analyze_intake(USER_ID, PROJECT_ID, session.id)
+    assert result["template"] is not None
+    assert result["template"]["key"] == "chatbot-rag"
+
+
+@pytest.mark.asyncio
+async def test_analyze_intake_greenfield_requires_template() -> None:
+    client = make_client()
+    service = VibeService(client, FakeLLM(), "fake-model")
+    session_id = await _make_intake_session(service, entry_mode="greenfield")
+    with pytest.raises(VibeIntakeError) as exc:
+        await service.analyze_intake(USER_ID, PROJECT_ID, session_id)
+    assert exc.value.code == "template_required"
+
+
+@pytest.mark.asyncio
+async def test_classify_intake_uses_matrix_and_confirm_persists() -> None:
+    client = make_client()
+    llm = FakeLLM()
+    llm.answers.append(
+        json.dumps(
+            {
+                "scope": "small",
+                "touches_data_api": True,
+                "rationale": "Menambah kolom dan endpoint filter.",
+            }
+        )
+    )
+    service = VibeService(client, llm, "fake-model")
+    session_id = await _make_intake_session(service, entry_mode="brownfield")
+
+    result = await service.classify_intake(USER_ID, PROJECT_ID, session_id)
+    assert result["scope"] == "small"
+    assert result["touches_data_api"] is True
+    assert "DATA_MODEL" in result["required_artifacts"]
+    assert "API_SPEC" in result["required_artifacts"]
+
+    # Nothing is persisted until the user confirms.
+    before = await service.get_session(USER_ID, PROJECT_ID, session_id)
+    assert before.feature_scope is None
+    confirmed = await service.confirm_intake(
+        USER_ID,
+        PROJECT_ID,
+        session_id,
+        scope="small",
+        touches_data_api=True,
+    )
+    assert confirmed.feature_scope == "small"
+    assert "DATA_MODEL" in confirmed.required_artifacts
+    assert confirmed.stage == "discovery"
+
+
+@pytest.mark.asyncio
+async def test_confirm_intake_greenfield_follows_template() -> None:
+    client = make_client()
+    service = VibeService(client, FakeLLM(), "fake-model")
+    session = await service.create_session(
+        USER_ID,
+        PROJECT_ID,
+        title="Landing",
+        idea="Landing page produk",
+        problem="",
+        target_users="",
+        constraints="",
+        entry_mode="greenfield",
+        template_key="landing-page",
+    )
+    confirmed = await service.confirm_intake(
+        USER_ID,
+        PROJECT_ID,
+        session.id,
+        scope="large",
+        touches_data_api=False,
+    )
+    # large = exactly the kinds the landing-page template declares; no data/API.
+    assert confirmed.required_artifacts == [
+        "PRD",
+        "ACCEPTANCE_TEST_PLAN",
+        "UI_UX_SPEC",
+        "AGENT_INSTRUCTIONS",
+        "IMPLEMENTATION_PLAN",
+        "DEFINITION_OF_DONE",
+    ]
+    assert confirmed.stage == "discovery"
+
+
+@pytest.mark.asyncio
+async def test_classify_intake_rejects_malformed_output() -> None:
+    client = make_client()
+    llm = FakeLLM()
+    llm.answers.append("bukan json")
+    service = VibeService(client, llm, "fake-model")
+    session_id = await _make_intake_session(service, entry_mode="brownfield")
+    with pytest.raises(VibeOutputError):
+        await service.classify_intake(USER_ID, PROJECT_ID, session_id)
+
+
+@pytest.mark.asyncio
+async def test_metering_records_token_usage() -> None:
+    client = make_client()
+    llm = FakeLLM()
+    llm.answers.append(discovery_json("Oke."))
+    llm.metas.append(
+        {"usage": {"prompt_tokens": 100, "completion_tokens": 40, "total_tokens": 140}}
+    )
+    service, session_id = await make_workspace(client, llm)
+    await service.discovery(USER_ID, PROJECT_ID, session_id, "Halo")
+
+    rows = client.table("token_usage_events").rows
+    assert len(rows) == 1
+    assert rows[0]["source"] == "vibe"
+    assert rows[0]["total_tokens"] == 140
+
+
+@pytest.mark.asyncio
+async def test_plan_lists_required_and_optional_kinds() -> None:
+    client = make_client()
+    service = VibeService(client, FakeLLM(), "fake-model")
+    session_id = await _make_intake_session(service, entry_mode="brownfield")
+    await service.update_session(
+        USER_ID,
+        PROJECT_ID,
+        session_id,
+        {"required_artifacts": ["PRD", "API_SPEC"], "feature_scope": "medium"},
+    )
+    plan = await service.get_plan(USER_ID, PROJECT_ID, session_id)
+    assert plan["required_artifacts"] == ["PRD", "API_SPEC"]
+    required_flags = {item["kind"]: item["required"] for item in plan["items"]}
+    assert required_flags["PRD"] is True
+    assert required_flags["API_SPEC"] is True
+    assert required_flags["UI_UX_SPEC"] is False
+
+
+@pytest.mark.asyncio
+async def test_staleness_only_marks_affected_kinds() -> None:
+    client = make_client()
+    llm = FakeLLM()
+    llm.answers.append("# PRD\n\nisi")
+    llm.answers.append("# UI\n\nisi")
+    service, session_id = await make_workspace(client, llm)
+    await service.generate_artifact(USER_ID, PROJECT_ID, session_id, "PRD")
+    await service.generate_artifact(USER_ID, PROJECT_ID, session_id, "UI_UX_SPEC")
+    await service.approve_artifact(session_id, "PRD")
+    await service.approve_artifact(session_id, "UI_UX_SPEC")
+
+    decision = await service.create_decision(
+        USER_ID,
+        session_id,
+        category="uiux",
+        statement="Tombol biru",
+        status="NEEDS_DECISION",
+        rationale="",
+    )
+    # Editing the statement (not just the status) must mark dependents stale.
+    await service.update_decision(session_id, decision.id, {"statement": "Tombol hijau"})
+
+    assert (await service.get_artifact(session_id, "UI_UX_SPEC")).status == "STALE"
+    assert (await service.get_artifact(session_id, "PRD")).status == "APPROVED"
+
+
+@pytest.mark.asyncio
+async def test_small_scope_caps_generated_tasks() -> None:
+    client = make_client()
+    llm = FakeLLM()
+    service = VibeService(client, llm, "fake-model")
+    session_id = await _make_intake_session(service, entry_mode="brownfield")
+    await service.update_session(
+        USER_ID, PROJECT_ID, session_id, {"feature_scope": "small"}
+    )
+    llm.answers.append(
+        json.dumps({"tasks": [{"key": "T-001", "title": "Kecil"}]})
+    )
+    await service.generate_tasks(USER_ID, PROJECT_ID, session_id, max_tasks=12)
+    prompt = llm.requests[-1].messages[-1].content
+    assert "MAKSIMUM: 4" in prompt
