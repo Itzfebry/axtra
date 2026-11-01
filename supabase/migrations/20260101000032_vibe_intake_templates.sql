@@ -25,23 +25,28 @@ alter table public.vibe_sessions
     add column if not exists baseline_commit text,
     add column if not exists baseline_indexed_at timestamptz;
 
-drop constraint if exists vibe_sessions_entry_mode_check on public.vibe_sessions;
 alter table public.vibe_sessions
+    drop constraint if exists vibe_sessions_entry_mode_check,
     add constraint vibe_sessions_entry_mode_check
-    check (entry_mode in ('brownfield', 'greenfield'));
+        check (entry_mode in ('brownfield', 'greenfield'));
 
-drop constraint if exists vibe_sessions_feature_scope_check on public.vibe_sessions;
 alter table public.vibe_sessions
+    drop constraint if exists vibe_sessions_feature_scope_check,
     add constraint vibe_sessions_feature_scope_check
-    check (feature_scope is null or feature_scope in ('small', 'medium', 'large'));
+        check (
+            feature_scope is null
+            or feature_scope in ('small', 'medium', 'large')
+        );
 
 -- Add the "intake" stage ahead of discovery.
-drop constraint if exists vibe_sessions_stage_check on public.vibe_sessions;
 alter table public.vibe_sessions
+    drop constraint if exists vibe_sessions_stage_check,
     add constraint vibe_sessions_stage_check
-    check (
-        stage in ('intake', 'discovery', 'specification', 'planning', 'verification')
-    );
+        check (
+            stage in (
+                'intake', 'discovery', 'specification', 'planning', 'verification'
+            )
+        );
 
 create index if not exists vibe_sessions_entry_mode_idx
     on public.vibe_sessions (entry_mode);
@@ -49,13 +54,13 @@ create index if not exists vibe_sessions_entry_mode_idx
 -- ---------------------------------------------------------------------------
 -- vibe_artifacts — extend allowed kinds
 -- ---------------------------------------------------------------------------
-drop constraint if exists vibe_artifacts_kind_check on public.vibe_artifacts;
 alter table public.vibe_artifacts
+    drop constraint if exists vibe_artifacts_kind_check,
     add constraint vibe_artifacts_kind_check
-    check (
-        kind in (
-            'PRD', 'ARCHITECTURE', 'DATA_MODEL', 'API_SPEC',
-            'ACCEPTANCE_TEST_PLAN', 'UI_UX_SPEC', 'AGENT_INSTRUCTIONS',
-            'IMPLEMENTATION_PLAN', 'DEFINITION_OF_DONE'
-        )
-    );
+        check (
+            kind in (
+                'PRD', 'ARCHITECTURE', 'DATA_MODEL', 'API_SPEC',
+                'ACCEPTANCE_TEST_PLAN', 'UI_UX_SPEC', 'AGENT_INSTRUCTIONS',
+                'IMPLEMENTATION_PLAN', 'DEFINITION_OF_DONE'
+            )
+        );
