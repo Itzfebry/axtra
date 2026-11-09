@@ -1,9 +1,13 @@
 "use client";
 
+import "katex/dist/katex.min.css";
+
 import { Check, Copy } from "lucide-react";
 import { useEffect, useRef, type ReactNode, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -61,6 +65,17 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 }
 
 /**
+ * Turn LaTeX delimiters the models commonly emit into the ones remark-math
+ * understands: `\( ... \)` → inline `$ ... $`, `\[ ... \]` → display `$$ ... $$`.
+ * Applied only outside fenced/inline code so real code is left untouched.
+ */
+function normalizeMath(segment: string): string {
+  return segment
+    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, body: string) => `\n\n$$\n${body}\n$$\n\n`)
+    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, body: string) => `$${body}$`);
+}
+
+/**
  * LLMs sometimes emit literal HTML line breaks (e.g. `<br>`) inside Markdown,
  * often within table cells. Renderers show them as raw text. Replace those
  * breaks with a visual separator, but leave fenced code blocks untouched.
@@ -77,29 +92,58 @@ function normalizeMarkdown(content: string): string {
       return segment
         .split(/(`[^`]*`)/g)
         .map((part) =>
-          part.startsWith("`") ? part : part.replace(brPattern, " · "),
+          part.startsWith("`")
+            ? part
+            : normalizeMath(part).replace(brPattern, " · "),
         )
         .join("");
     })
     .join("");
 }
 
+const remarkPlugins = [remarkGfm, remarkMath];
+const rehypePlugins = [rehypeKatex];
+
+const components = {
+  pre: ({ children }: { children?: ReactNode }) => (
+    <CodeBlock>{children}</CodeBlock>
+  ),
+  a: ({ children, href }: { children?: ReactNode; href?: string }) => (
+    <a href={href} target="_blank" rel="noopener noreferrer">
+      {children}
+    </a>
+  ),
+};
+
 export function Markdown({ content }: { content: string }) {
   return (
     <div className="markdown text-[14px] leading-relaxed">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-          a: ({ children, href }) => (
-            <a href={href} target="_blank" rel="noopener noreferrer">
-              {children}
-            </a>
-          ),
-        }}
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={rehypePlugins}
+        components={components}
       >
         {normalizeMarkdown(content)}
       </ReactMarkdown>
     </div>
+  );
+}
+
+/**
+ * Inline variant for short strings (quiz questions/options/explanations) that
+ * should render math but not add block spacing. Paragraphs are unwrapped.
+ */
+export function MathText({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={rehypePlugins}
+      components={{
+        ...components,
+        p: ({ children }: { children?: ReactNode }) => <>{children}</>,
+      }}
+    >
+      {normalizeMarkdown(content)}
+    </ReactMarkdown>
   );
 }

@@ -1214,6 +1214,13 @@ class StudyGradeOut(BaseModel):
     results: list[StudyQuestionResult] = Field(default_factory=list)
 
 
+class StudyQuizAttempt(BaseModel):
+    score: int = 0
+    correct: int = 0
+    total: int = 0
+    at: datetime | None = None
+
+
 class StudyReviewRequest(BaseModel):
     days: int = Field(default=1, ge=1, le=365)
 
@@ -1231,6 +1238,7 @@ class StudyTopicOut(BaseModel):
     source_filename: str = ""
     source_chars: int = 0
     quiz: list[StudyQuizQuestion] = Field(default_factory=list)
+    quiz_history: list[StudyQuizAttempt] = Field(default_factory=list)
     plan: list[StudyPlanItem] = Field(default_factory=list)
     target_date: date | None = None
     next_review_at: datetime | None = None

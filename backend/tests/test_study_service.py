@@ -119,6 +119,10 @@ def test_generate_quiz_parses_and_grades() -> None:
         wrong = await service.grade_quiz(USER, topic.id, [1])
         assert wrong.correct == 0
 
+        refreshed = await service.get(USER, topic.id)
+        assert refreshed is not None
+        assert [attempt.score for attempt in refreshed.quiz_history] == [100, 0]
+
     asyncio.run(run())
 
 

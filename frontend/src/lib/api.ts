@@ -2215,6 +2215,13 @@ export type StudyPlanItem = {
   tasks: string[];
 };
 
+export type StudyQuizAttempt = {
+  score: number;
+  correct: number;
+  total: number;
+  at: string | null;
+};
+
 export type StudyGradeResult = {
   total: number;
   correct: number;
@@ -2235,6 +2242,7 @@ export type StudyTopic = {
   source_filename: string;
   source_chars: number;
   quiz: StudyQuizQuestion[];
+  quiz_history: StudyQuizAttempt[];
   plan: StudyPlanItem[];
   target_date: string | null;
   next_review_at: string | null;

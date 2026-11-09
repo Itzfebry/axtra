@@ -202,6 +202,29 @@ body {
   font-weight: 600;
 }
 
+/* KaTeX: keep long formulas from breaking layout on small screens. */
+.markdown .katex {
+  font-size: 1.05em;
+}
+
+.markdown .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+  margin: 0.75em 0;
+}
+
+.markdown .katex-display > .katex {
+  white-space: normal;
+}
+
+.markdown .katex-error {
+  color: var(--danger);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+
 /* ---------------------------------------------------------------------------
    Transitions — smooth page and menu updates (Design.md §9)
 --------------------------------------------------------------------------- */

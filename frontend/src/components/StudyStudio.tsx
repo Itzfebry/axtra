@@ -5,6 +5,7 @@ import {
   BookOpen,
   CalendarCheck,
   Check,
+  History,
   ListChecks,
   Pencil,
   Plus,
@@ -18,7 +19,7 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 import { LoadingState } from "@/components/ui/LoadingState";
-import { Markdown } from "@/components/Markdown";
+import { Markdown, MathText } from "@/components/Markdown";
 import {
   createStudyTopic,
   deleteStudyTopic,
@@ -548,6 +549,7 @@ function TopicDetail({
   onDelete: () => void;
 }) {
   const currentDay = todayIndex(topic);
+  const [tab, setTab] = useState<"materi" | "kuis" | "rencana">("materi");
   const [editOpen, setEditOpen] = useState(false);
   const [editTitle, setEditTitle] = useState(topic.title);
   const [editSubject, setEditSubject] = useState(topic.subject);
@@ -745,286 +747,387 @@ function TopicDetail({
         </div>
       </div>
 
-      {/* Import source */}
-      <section className="mt-4 rounded-lg border border-border bg-surface p-4">
-        <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
-          <Upload size={13} aria-hidden /> Materi sumber
-        </h3>
-        <p className="mt-1 text-[12px] text-muted">
-          {topic.source_filename
-            ? `${topic.source_filename} · ${topic.source_chars.toLocaleString("id-ID")} karakter`
-            : "Impor PDF/TXT/MD agar materi dan soal mengikuti sumber aslinya."}
-        </p>
-        <label
-          className={`mt-2 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12px] text-muted transition-colors duration-150 hover:text-foreground ${
-            busy === "import" ? "opacity-50" : ""
-          }`}
-        >
-          <Upload size={12} aria-hidden />
-          {busy === "import" ? "Mengimpor..." : "Pilih file"}
-          <input
-            type="file"
-            accept=".pdf,.txt,.md,.markdown,.csv,.json"
-            className="sr-only"
-            disabled={busy === "import"}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) onImport(file);
-              event.target.value = "";
-            }}
-          />
-        </label>
-      </section>
+      <div
+        role="tablist"
+        aria-label="Bagian belajar"
+        className="mt-4 flex items-center gap-1 rounded-lg border border-border bg-surface p-1"
+      >
+        {(
+          [
+            { key: "materi", label: "Materi" },
+            { key: "kuis", label: "Kuis" },
+            { key: "rencana", label: "Rencana" },
+          ] as const
+        ).map(({ key, label }) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={tab === key}
+            onClick={() => setTab(key)}
+            className={`flex-1 rounded-md px-3 py-1.5 text-[13px] font-medium transition-colors duration-150 ${
+              tab === key
+                ? "bg-primary text-primary-foreground"
+                : "text-muted hover:text-foreground"
+            }`}
+          >
+            {label}
+            {key === "kuis" && topic.quiz.length > 0 && (
+              <span className="ml-1.5 text-[11px] opacity-70">
+                {topic.quiz.length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
 
-      {/* Material */}
-      <section className="mt-4 rounded-lg border border-border bg-surface p-4">
-        <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
-          <Sparkles size={13} aria-hidden /> Materi belajar
-        </h3>
-        <div className="mt-2">
-          <label htmlFor="study-focus" className="block text-[12px] text-muted">
-            Fokus materi (opsional)
-          </label>
-          <div className="mt-1 flex flex-col gap-2 sm:flex-row">
-            <input
-              id="study-focus"
-              value={focus}
-              onChange={(event) => onFocus(event.target.value)}
-              placeholder="Contoh: fokus soal deret angka"
-              className={inputClass}
+      {tab === "materi" && (
+        <>
+          {/* Import source */}
+          <section className="mt-4 rounded-lg border border-border bg-surface p-4">
+            <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
+              <Upload size={13} aria-hidden /> Materi sumber
+            </h3>
+            <p className="mt-1 text-[12px] text-muted">
+              {topic.source_filename
+                ? `${topic.source_filename} · ${topic.source_chars.toLocaleString("id-ID")} karakter`
+                : "Impor PDF/TXT/MD agar materi dan soal mengikuti sumber aslinya."}
+            </p>
+            <label
+              className={`mt-2 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12px] text-muted transition-colors duration-150 hover:text-foreground ${
+                busy === "import" ? "opacity-50" : ""
+              }`}
+            >
+              <Upload size={12} aria-hidden />
+              {busy === "import" ? "Mengimpor..." : "Pilih file"}
+              <input
+                type="file"
+                accept=".pdf,.txt,.md,.markdown,.csv,.json"
+                className="sr-only"
+                disabled={busy === "import"}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) onImport(file);
+                  event.target.value = "";
+                }}
+              />
+            </label>
+          </section>
+
+          {/* Material */}
+          <section className="mt-4 rounded-lg border border-border bg-surface p-4">
+            <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
+              <Sparkles size={13} aria-hidden /> Materi belajar
+            </h3>
+            <div className="mt-2">
+              <label htmlFor="study-focus" className="block text-[12px] text-muted">
+                Fokus materi (opsional)
+              </label>
+              <div className="mt-1 flex flex-col gap-2 sm:flex-row">
+                <input
+                  id="study-focus"
+                  value={focus}
+                  onChange={(event) => onFocus(event.target.value)}
+                  placeholder="Contoh: fokus soal deret angka"
+                  className={inputClass}
+                />
+                <button
+                  type="button"
+                  disabled={busy === "generate"}
+                  onClick={onGenerate}
+                  className={`${primaryButton} shrink-0`}
+                >
+                  <Sparkles size={14} aria-hidden />
+                  {busy === "generate"
+                    ? "Menyusun..."
+                    : topic.material
+                      ? "Buat ulang materi"
+                      : "Buat materi"}
+                </button>
+              </div>
+            </div>
+            {busy === "generate" && (
+              <p className="mt-3 text-[13px] text-muted" role="status">
+                Menyusun materi belajar...
+              </p>
+            )}
+            {topic.material ? (
+              <div className="mt-3">
+                <Markdown content={topic.material} />
+              </div>
+            ) : (
+              busy !== "generate" && (
+                <p className="mt-3 text-[13px] text-muted">
+                  Belum ada materi. Impor sumber atau klik “Buat materi”.
+                </p>
+              )
+            )}
+          </section>
+
+          {/* Notes */}
+          <section className="mt-4 rounded-lg border border-border bg-surface p-4">
+            <label htmlFor="study-notes" className="block text-[12px] text-muted">
+              Catatan pribadi
+            </label>
+            <textarea
+              id="study-notes"
+              value={notes}
+              onChange={(event) => onNotes(event.target.value)}
+              rows={3}
+              placeholder="Rangkuman atau hal yang ingin diingat"
+              className={`mt-1 ${inputClass}`}
             />
             <button
               type="button"
-              disabled={busy === "generate"}
-              onClick={onGenerate}
-              className={`${primaryButton} shrink-0`}
+              disabled={busy === "notes"}
+              onClick={onSaveNotes}
+              className={`mt-2 ${chipClass}`}
             >
-              <Sparkles size={14} aria-hidden />
-              {busy === "generate"
-                ? "Menyusun..."
-                : topic.material
-                  ? "Buat ulang materi"
-                  : "Buat materi"}
+              Simpan catatan
             </button>
-          </div>
-        </div>
-        {busy === "generate" && (
-          <p className="mt-3 text-[13px] text-muted" role="status">
-            Menyusun materi belajar...
-          </p>
-        )}
-        {topic.material ? (
-          <div className="mt-3">
-            <Markdown content={topic.material} />
-          </div>
-        ) : (
-          busy !== "generate" && (
-            <p className="mt-3 text-[13px] text-muted">
-              Belum ada materi. Impor sumber atau klik “Buat materi”.
-            </p>
-          )
-        )}
-      </section>
+          </section>
+        </>
+      )}
 
-      {/* Quiz */}
-      <section className="mt-4 rounded-lg border border-border bg-surface p-4">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
-            <ListChecks size={13} aria-hidden /> Kuis
-          </h3>
-          <button
-            type="button"
-            disabled={busy === "quiz"}
-            onClick={onQuiz}
-            className={chipClass}
-          >
-            {busy === "quiz"
-              ? "Menyusun..."
-              : topic.quiz.length
-                ? "Buat ulang kuis"
-                : "Buat kuis"}
-          </button>
-        </div>
-
-        {topic.quiz.length === 0 ? (
-          <p className="mt-2 text-[13px] text-muted">
-            Belum ada kuis. Kuis dibuat dari topik/materi; buat materi atau impor
-            sumber dulu agar soal lebih akurat.
-          </p>
-        ) : (
-          <div className="mt-3 space-y-4">
-            {topic.quiz.map((question, qIndex) => {
-              const result = grade?.results[qIndex];
-              return (
-                <div key={qIndex}>
-                  <p className="text-[13px] font-medium">
-                    {qIndex + 1}. {question.question}
-                  </p>
-                  <div className="mt-1.5 space-y-1">
-                    {question.options.map((option, oIndex) => {
-                      const picked = answers[qIndex] === oIndex;
-                      const correctOption = result && result.answer === oIndex;
-                      const wrongPick = result && picked && !result.correct;
-                      return (
-                        <label
-                          key={oIndex}
-                          className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[13px] ${
-                            correctOption
-                              ? "border-success/50 text-foreground"
-                              : wrongPick
-                                ? "border-danger/50 text-danger"
-                                : picked
-                                  ? "border-foreground/40 bg-surface-muted text-foreground"
-                                  : "border-border text-muted"
-                          }`}
-                        >
-                          <input
-                            type="radio"
-                            name={`q-${topic.id}-${qIndex}`}
-                            checked={picked}
-                            onChange={() => onAnswer(qIndex, oIndex)}
-                            className="h-3.5 w-3.5 accent-foreground"
-                          />
-                          {option}
-                        </label>
-                      );
-                    })}
-                  </div>
-                  {result && (
-                    <p className="mt-1.5 text-[12px] text-muted">
-                      {result.correct ? "Benar. " : "Salah. "}
-                      {result.explanation}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-            <div className="flex flex-wrap items-center gap-2">
+      {tab === "kuis" && (
+        <>
+          <section className="mt-4 rounded-lg border border-border bg-surface p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
+                <ListChecks size={13} aria-hidden /> Kuis
+              </h3>
               <button
                 type="button"
-                disabled={busy === "grade" || answers.filter((a) => a !== undefined).length === 0}
-                onClick={onSubmitQuiz}
-                className={primaryButton}
+                disabled={busy === "quiz"}
+                onClick={onQuiz}
+                className={chipClass}
               >
-                <Check size={14} aria-hidden />
-                {busy === "grade" ? "Menilai..." : "Periksa jawaban"}
+                {busy === "quiz"
+                  ? "Menyusun..."
+                  : topic.quiz.length
+                    ? "Buat ulang kuis"
+                    : "Buat kuis"}
               </button>
-              {grade && (
-                <span className="text-[12px] text-muted">
-                  Skor {grade.score}% ({grade.correct}/{grade.total})
-                </span>
-              )}
             </div>
-          </div>
-        )}
-      </section>
 
-      {/* Plan */}
-      <section className="mt-4 rounded-lg border border-border bg-surface p-4">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
-            <CalendarCheck size={13} aria-hidden /> Rencana harian
-          </h3>
-          <button
-            type="button"
-            disabled={busy === "plan"}
-            onClick={onPlan}
-            className={chipClass}
-          >
-            {busy === "plan"
-              ? "Menyusun..."
-              : topic.plan.length
-                ? "Buat ulang rencana"
-                : "Buat rencana"}
-          </button>
-        </div>
-        {topic.plan.length === 0 ? (
-          <p className="mt-2 text-[13px] text-muted">
-            Belum ada rencana. Isi tanggal target agar rencana menyesuaikan waktu.
-          </p>
-        ) : (
-          <ol className="mt-3 space-y-2">
-            {topic.plan.map((item) => {
-              const isToday = item.day === currentDay;
-              return (
-                <li
-                  key={item.day}
-                  className={`rounded-lg border px-3 py-2 ${
-                    isToday
-                      ? "border-primary/40 bg-primary/5"
-                      : "border-border"
-                  }`}
-                >
-                  <p className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
-                    <span className="rounded border border-border px-1.5 py-0.5">
-                      Hari {item.day}
+            {topic.quiz.length === 0 ? (
+              <p className="mt-2 text-[13px] text-muted">
+                Belum ada kuis. Kuis dibuat dari topik/materi; buat materi atau impor
+                sumber dulu agar soal lebih akurat.
+              </p>
+            ) : (
+              <div className="mt-3 space-y-4">
+                {topic.quiz.map((question, qIndex) => {
+                  const result = grade?.results[qIndex];
+                  return (
+                    <div key={qIndex}>
+                      <p className="text-[13px] font-medium">
+                        {qIndex + 1}. <MathText content={question.question} />
+                      </p>
+                      <div className="mt-1.5 space-y-1">
+                        {question.options.map((option, oIndex) => {
+                          const picked = answers[qIndex] === oIndex;
+                          const correctOption = result && result.answer === oIndex;
+                          const wrongPick = result && picked && !result.correct;
+                          return (
+                            <label
+                              key={oIndex}
+                              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[13px] ${
+                                correctOption
+                                  ? "border-success/50 text-foreground"
+                                  : wrongPick
+                                    ? "border-danger/50 text-danger"
+                                    : picked
+                                      ? "border-foreground/40 bg-surface-muted text-foreground"
+                                      : "border-border text-muted"
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`q-${topic.id}-${qIndex}`}
+                                checked={picked}
+                                onChange={() => onAnswer(qIndex, oIndex)}
+                                className="h-3.5 w-3.5 shrink-0 accent-foreground"
+                              />
+                              <span className="min-w-0">
+                                <MathText content={option} />
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                      {result && (
+                        <p className="mt-1.5 text-[12px] text-muted">
+                          {result.correct ? "Benar. " : "Salah. "}
+                          <MathText content={result.explanation} />
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={
+                      busy === "grade" ||
+                      answers.filter((a) => a !== undefined).length === 0
+                    }
+                    onClick={onSubmitQuiz}
+                    className={primaryButton}
+                  >
+                    <Check size={14} aria-hidden />
+                    {busy === "grade" ? "Menilai..." : "Periksa jawaban"}
+                  </button>
+                  {grade && (
+                    <span className="text-[12px] text-muted">
+                      Skor {grade.score}% ({grade.correct}/{grade.total})
                     </span>
-                    {isToday && <span className="text-primary">Hari ini</span>}
-                  </p>
-                  {item.focus && (
-                    <p className="mt-1 text-[13px]">{item.focus}</p>
                   )}
-                  {item.tasks.length > 0 && (
-                    <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[12px] text-muted">
-                      {item.tasks.map((task, index) => (
-                        <li key={index}>{task}</li>
-                      ))}
-                    </ul>
-                  )}
-                </li>
-              );
-            })}
-          </ol>
-        )}
-      </section>
+                </div>
+              </div>
+            )}
+          </section>
 
-      {/* Review */}
-      <section className="mt-4 rounded-lg border border-border bg-surface p-4">
-        <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
-          <RefreshCw size={13} aria-hidden /> Review terjadwal
-        </h3>
-        <p className="mt-1 text-[12px] text-muted">
-          {topic.next_review_at
-            ? `Review berikutnya: ${formatDate(topic.next_review_at)} (masuk Jadwal + Telegram/PWA).`
-            : "Jadwalkan pengulangan agar materi tidak lupa."}
-        </p>
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {[1, 3, 7, 14].map((days) => (
-            <button
-              key={days}
-              type="button"
-              disabled={busy === "review"}
-              onClick={() => onReview(days)}
-              className={chipClass}
-            >
-              +{days} hari
-            </button>
-          ))}
-        </div>
-      </section>
+          {/* Quiz history */}
+          <section className="mt-4 rounded-lg border border-border bg-surface p-4">
+            <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
+              <History size={13} aria-hidden /> Riwayat kuis
+            </h3>
+            {topic.quiz_history.length === 0 ? (
+              <p className="mt-2 text-[13px] text-muted">
+                Belum ada riwayat. Kerjakan kuis lalu periksa jawaban.
+              </p>
+            ) : (
+              <ul className="mt-3 divide-y divide-border">
+                {[...topic.quiz_history].reverse().map((attempt, index) => (
+                  <li
+                    key={index}
+                    className="flex items-center justify-between gap-3 py-2 text-[13px]"
+                  >
+                    <span className="text-muted">
+                      {attempt.at
+                        ? new Date(attempt.at).toLocaleString("id-ID", {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : "—"}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-muted">
+                        {attempt.correct}/{attempt.total}
+                      </span>
+                      <span
+                        className={`rounded border px-1.5 py-0.5 text-[12px] ${
+                          attempt.score >= 70
+                            ? "border-success/50 text-success"
+                            : "border-border text-muted"
+                        }`}
+                      >
+                        {attempt.score}%
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      )}
 
-      {/* Notes */}
-      <section className="mt-4 rounded-lg border border-border bg-surface p-4">
-        <label htmlFor="study-notes" className="block text-[12px] text-muted">
-          Catatan pribadi
-        </label>
-        <textarea
-          id="study-notes"
-          value={notes}
-          onChange={(event) => onNotes(event.target.value)}
-          rows={3}
-          placeholder="Rangkuman atau hal yang ingin diingat"
-          className={`mt-1 ${inputClass}`}
-        />
-        <button
-          type="button"
-          disabled={busy === "notes"}
-          onClick={onSaveNotes}
-          className={`mt-2 ${chipClass}`}
-        >
-          Simpan catatan
-        </button>
-      </section>
+      {tab === "rencana" && (
+        <>
+          {/* Plan */}
+          <section className="mt-4 rounded-lg border border-border bg-surface p-4">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
+                <CalendarCheck size={13} aria-hidden /> Rencana harian
+              </h3>
+              <button
+                type="button"
+                disabled={busy === "plan"}
+                onClick={onPlan}
+                className={chipClass}
+              >
+                {busy === "plan"
+                  ? "Menyusun..."
+                  : topic.plan.length
+                    ? "Buat ulang rencana"
+                    : "Buat rencana"}
+              </button>
+            </div>
+            {topic.plan.length === 0 ? (
+              <p className="mt-2 text-[13px] text-muted">
+                Belum ada rencana. Isi tanggal target agar rencana menyesuaikan waktu.
+              </p>
+            ) : (
+              <ol className="mt-3 space-y-2">
+                {topic.plan.map((item) => {
+                  const isToday = item.day === currentDay;
+                  return (
+                    <li
+                      key={item.day}
+                      className={`rounded-lg border px-3 py-2 ${
+                        isToday
+                          ? "border-primary/40 bg-primary/5"
+                          : "border-border"
+                      }`}
+                    >
+                      <p className="flex flex-wrap items-center gap-2 text-[12px] text-muted">
+                        <span className="rounded border border-border px-1.5 py-0.5">
+                          Hari {item.day}
+                        </span>
+                        {isToday && <span className="text-primary">Hari ini</span>}
+                      </p>
+                      {item.focus && (
+                        <p className="mt-1 text-[13px]">
+                          <MathText content={item.focus} />
+                        </p>
+                      )}
+                      {item.tasks.length > 0 && (
+                        <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[12px] text-muted">
+                          {item.tasks.map((task, index) => (
+                            <li key={index}>
+                              <MathText content={task} />
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </section>
+
+          {/* Review */}
+          <section className="mt-4 rounded-lg border border-border bg-surface p-4">
+            <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
+              <RefreshCw size={13} aria-hidden /> Review terjadwal
+            </h3>
+            <p className="mt-1 text-[12px] text-muted">
+              {topic.next_review_at
+                ? `Review berikutnya: ${formatDate(topic.next_review_at)} (masuk Jadwal + Telegram/PWA).`
+                : "Jadwalkan pengulangan agar materi tidak lupa."}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              {[1, 3, 7, 14].map((days) => (
+                <button
+                  key={days}
+                  type="button"
+                  disabled={busy === "review"}
+                  onClick={() => onReview(days)}
+                  className={chipClass}
+                >
+                  +{days} hari
+                </button>
+              ))}
+            </div>
+          </section>
+        </>
+      )}
     </div>
   );
 }
