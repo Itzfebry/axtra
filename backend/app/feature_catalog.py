@@ -126,8 +126,25 @@ FEATURE_SPECS: dict[str, dict[str, Any]] = {
             _skill("alternatif", "Tunjukkan alternatif", "Beri opsi desain.", "Tawarkan minimal satu alternatif desain beserta trade-off-nya."),
         ],
     },
-    "jobs:analyze": {
-        "group": "Cari Kerja",
+    "study": {
+        "group": "Belajar",
+        "label": "Belajar",
+        "description": "Susun materi belajar dan latihan dari topik apa pun.",
+        "roles": [
+            _ROLE("mentor", "Mentor belajar", "Menjelaskan sambil mengajar.", "Kamu mentor belajar; jelaskan konsep dengan jelas dan bertahap."),
+            _ROLE("tutor", "Tutor ujian", "Fokus soal & strategi.", "Kamu tutor persiapan ujian; tekankan pola soal, trik, dan strategi waktu."),
+            _ROLE("perangkum", "Perangkum materi", "Padat dan terstruktur.", "Kamu perangkum materi; sajikan ringkas, terstruktur, dan mudah dihafal."),
+            _ROLE("kurikulum", "Perancang kurikulum", "Urutan belajar terukur.", "Kamu perancang kurikulum; susun urutan belajar bertahap dengan target jelas."),
+        ],
+        "behaviors": [],
+        "skills": [
+            _skill("contoh-soal", "Sertakan contoh soal", "Latihan realistis.", "Sertakan contoh soal beserta kunci jawaban singkat."),
+            _skill("kuis", "Tambah kuis", "Uji pemahaman.", "Tambahkan pertanyaan latihan agar pengguna menguji diri."),
+            _skill("bertahap", "Mulai dari dasar", "Tidak melompat.", "Jelaskan dari dasar sebelum konsep lanjutan."),
+            _skill("hafalan", "Bantu hafalan", "Ringkas & mudah diingat.", "Gunakan daftar poin ringkas yang mudah dihafal."),
+        ],
+    },
+    "jobs:analyze": {        "group": "Cari Kerja",
         "label": "Analisa CV & lowongan",
         "description": "Skor kecocokan, gap, dan peluang lolos.",
         "roles": [

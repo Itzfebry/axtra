@@ -128,6 +128,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       "/jobs": "Cari Kerja",
       "/jadwal": "Jadwal",
       "/images": "Gambar",
+      "/belajar": "Belajar",
       "/settings": "Pengaturan",
     };
     let name = "Axtra";
@@ -199,6 +200,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/jobs/") ||
     pathname === "/jadwal" ||
     pathname === "/images" ||
+    pathname === "/belajar" ||
     pathname === "/settings";
 
   const handleDeleteConversation = useCallback(

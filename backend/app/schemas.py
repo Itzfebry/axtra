@@ -1156,6 +1156,90 @@ class GoalOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Belajar (study topics + AI-generated material)
+# ---------------------------------------------------------------------------
+StudyStatus = Literal["active", "done", "archived"]
+
+
+class StudyTopicCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    subject: str = Field(default="", max_length=120)
+    goal: str = Field(default="", max_length=2000)
+    notes: str = Field(default="", max_length=20000)
+    target_date: date | None = None
+
+
+class StudyTopicUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    subject: str | None = Field(default=None, max_length=120)
+    goal: str | None = Field(default=None, max_length=2000)
+    status: StudyStatus | None = None
+    progress: int | None = Field(default=None, ge=0, le=100)
+    notes: str | None = Field(default=None, max_length=20000)
+    material: str | None = Field(default=None, max_length=60000)
+    target_date: date | None = None
+
+
+class StudyGenerateRequest(BaseModel):
+    focus: str = Field(default="", max_length=1000)
+
+
+class StudyQuizQuestion(BaseModel):
+    question: str = ""
+    options: list[str] = Field(default_factory=list)
+    answer: int = 0
+    explanation: str = ""
+
+
+class StudyPlanItem(BaseModel):
+    day: int = 1
+    focus: str = ""
+    tasks: list[str] = Field(default_factory=list)
+
+
+class StudyGradeRequest(BaseModel):
+    answers: list[int] = Field(default_factory=list, max_length=50)
+
+
+class StudyQuestionResult(BaseModel):
+    correct: bool = False
+    answer: int = 0
+    explanation: str = ""
+
+
+class StudyGradeOut(BaseModel):
+    total: int = 0
+    correct: int = 0
+    score: int = 0
+    results: list[StudyQuestionResult] = Field(default_factory=list)
+
+
+class StudyReviewRequest(BaseModel):
+    days: int = Field(default=1, ge=1, le=365)
+
+
+class StudyTopicOut(BaseModel):
+    id: str
+    title: str
+    subject: str = ""
+    goal: str = ""
+    status: StudyStatus = "active"
+    progress: int = 0
+    notes: str = ""
+    material: str = ""
+    source: str = "web"
+    source_filename: str = ""
+    source_chars: int = 0
+    quiz: list[StudyQuizQuestion] = Field(default_factory=list)
+    plan: list[StudyPlanItem] = Field(default_factory=list)
+    target_date: date | None = None
+    next_review_at: datetime | None = None
+    goal_id: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+# ---------------------------------------------------------------------------
 # Telegram + automation
 # ---------------------------------------------------------------------------
 class TelegramLinkOut(BaseModel):

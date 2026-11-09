@@ -1,5 +1,6 @@
 import {
   BadgeCheck,
+  BookOpen,
   Brain,
   Briefcase,
   CalendarClock,
@@ -68,6 +69,14 @@ export const FEATURES: Feature[] = [
     title: "Proyek",
     description: "Spesifikasi, keputusan teknis, progres, dan dokumen proyek.",
     icon: FolderKanban,
+  },
+  {
+    id: "belajar",
+    href: "/belajar",
+    title: "Belajar",
+    description:
+      "Susun materi belajar (CPNS, kursus, topik lain) dan latihan dari Axtra.",
+    icon: BookOpen,
   },
   {
     id: "jobs",

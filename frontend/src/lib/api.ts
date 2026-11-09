@@ -2197,3 +2197,160 @@ export async function testPush(): Promise<PushResult> {
   return apiFetch<PushResult>("/push/test", { method: "POST" });
 }
 
+// ---------------------------------------------------------------------------
+// Belajar (study topics + AI-generated material)
+// ---------------------------------------------------------------------------
+export type StudyStatus = "active" | "done" | "archived";
+
+export type StudyQuizQuestion = {
+  question: string;
+  options: string[];
+  answer: number;
+  explanation: string;
+};
+
+export type StudyPlanItem = {
+  day: number;
+  focus: string;
+  tasks: string[];
+};
+
+export type StudyGradeResult = {
+  total: number;
+  correct: number;
+  score: number;
+  results: { correct: boolean; answer: number; explanation: string }[];
+};
+
+export type StudyTopic = {
+  id: string;
+  title: string;
+  subject: string;
+  goal: string;
+  status: StudyStatus;
+  progress: number;
+  notes: string;
+  material: string;
+  source: string;
+  source_filename: string;
+  source_chars: number;
+  quiz: StudyQuizQuestion[];
+  plan: StudyPlanItem[];
+  target_date: string | null;
+  next_review_at: string | null;
+  goal_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type StudyTopicInput = {
+  title: string;
+  subject?: string;
+  goal?: string;
+  notes?: string;
+  target_date?: string | null;
+};
+
+export async function listStudyTopics(params?: {
+  status?: StudyStatus;
+}): Promise<StudyTopic[]> {
+  const suffix = params?.status ? `?status=${params.status}` : "";
+  const data = await apiFetch<StudyTopic[]>(`/study${suffix}`);
+  return data ?? [];
+}
+
+export async function createStudyTopic(input: StudyTopicInput): Promise<StudyTopic> {
+  return apiFetch<StudyTopic>("/study", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateStudyTopic(
+  id: string,
+  patch: Partial<StudyTopicInput> & {
+    status?: StudyStatus;
+    progress?: number;
+    material?: string;
+    notes?: string;
+  },
+): Promise<StudyTopic> {
+  return apiFetch<StudyTopic>(`/study/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteStudyTopic(id: string): Promise<void> {
+  await apiFetch<void>(`/study/${id}`, { method: "DELETE" });
+}
+
+export async function generateStudyMaterial(
+  id: string,
+  focus = "",
+): Promise<StudyTopic> {
+  return apiFetch<StudyTopic>(`/study/${id}/generate`, {
+    method: "POST",
+    body: JSON.stringify({ focus }),
+  });
+}
+
+export async function importStudyMaterial(
+  id: string,
+  file: File,
+): Promise<StudyTopic> {
+  const form = new FormData();
+  form.append("file", file);
+  const response = await fetch(`${API_BASE}/study/${id}/import`, {
+    method: "POST",
+    body: form,
+    credentials: "include",
+  });
+  const text = await response.text();
+  let data: unknown = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+  if (!response.ok) {
+    const detail =
+      (data as { detail?: string } | null)?.detail ??
+      `Gagal mengimpor materi (${response.status}).`;
+    throw new ApiError(response.status, detail);
+  }
+  return data as StudyTopic;
+}
+
+export async function generateStudyQuiz(id: string): Promise<StudyTopic> {
+  return apiFetch<StudyTopic>(`/study/${id}/quiz`, { method: "POST" });
+}
+
+export async function gradeStudyQuiz(
+  id: string,
+  answers: number[],
+): Promise<StudyGradeResult> {
+  return apiFetch<StudyGradeResult>(`/study/${id}/quiz/grade`, {
+    method: "POST",
+    body: JSON.stringify({ answers }),
+  });
+}
+
+export async function generateStudyPlan(id: string): Promise<StudyTopic> {
+  return apiFetch<StudyTopic>(`/study/${id}/plan`, { method: "POST" });
+}
+
+export async function scheduleStudyReview(
+  id: string,
+  days: number,
+): Promise<StudyTopic> {
+  return apiFetch<StudyTopic>(`/study/${id}/review`, {
+    method: "POST",
+    body: JSON.stringify({ days }),
+  });
+}
+
+export async function linkStudyGoal(id: string): Promise<StudyTopic> {
+  return apiFetch<StudyTopic>(`/study/${id}/goal`, { method: "POST" });
+}
+

@@ -6,7 +6,6 @@ scoped to a single conversation and injected as context by the chat service.
 
 from __future__ import annotations
 
-import io
 from typing import Any
 
 from fastapi import (
@@ -23,51 +22,19 @@ from fastapi import (
 from app.config import Settings, get_settings
 from app.deps import CurrentUser, rate_limit, read_rate_limit
 from app.schemas import DocumentOut
+from app.services.file_text import extract_text, safe_filename
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
-_TEXT_EXTENSIONS = (".txt", ".md", ".markdown", ".csv", ".json", ".log")
-_PDF_EXTENSIONS = (".pdf",)
 MAX_DOCUMENTS_PER_CONVERSATION = 10
 
 
 def _safe_filename(name: str | None) -> str:
-    base = (name or "dokumen").replace("\\", "/").split("/")[-1].strip()
-    return base[:200] or "dokumen"
+    return safe_filename(name)
 
 
 def _extract_text(filename: str, mime_type: str, data: bytes) -> str:
-    lower = filename.lower()
-    if lower.endswith(_PDF_EXTENSIONS) or mime_type == "application/pdf":
-        try:
-            from pypdf import PdfReader
-        except ImportError as exc:  # pragma: no cover - dependency guard
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                detail="Dukungan PDF belum terpasang di server.",
-            ) from exc
-        try:
-            reader = PdfReader(io.BytesIO(data))
-            pages = [(page.extract_text() or "") for page in reader.pages]
-        except Exception as exc:  # noqa: BLE001 - surface a friendly error
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                detail=f"Gagal membaca PDF: {exc}",
-            ) from exc
-        return "\n".join(pages).strip()
-
-    if lower.endswith(_TEXT_EXTENSIONS) or mime_type.startswith("text/"):
-        for encoding in ("utf-8-sig", "utf-8", "utf-16", "latin-1"):
-            try:
-                return data.decode(encoding).strip()
-            except UnicodeDecodeError:
-                continue
-        return data.decode("utf-8", errors="replace").strip()
-
-    raise HTTPException(
-        status.HTTP_400_BAD_REQUEST,
-        detail="Format tidak didukung. Gunakan TXT, MD, atau PDF.",
-    )
+    return extract_text(filename, mime_type, data)
 
 
 async def _resolve_conversation(

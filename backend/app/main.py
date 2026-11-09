@@ -36,6 +36,7 @@ from app.routers import (
     research,
     schedules,
     skills,
+    study,
     telegram,
     usage,
     vibe,
@@ -127,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(providers.router)
     app.include_router(images.router)
     app.include_router(journal.router)
+    app.include_router(study.router)
     app.include_router(telegram.router)
     app.include_router(schedules.router)
     app.include_router(push.router)

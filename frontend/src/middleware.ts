@@ -12,6 +12,7 @@ const PROTECTED = [
   "/vibe",
   "/journal",
   "/goals",
+  "/belajar",
 ];
 const SESSION_COOKIE = "axtra_session";
 

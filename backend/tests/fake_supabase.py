@@ -63,6 +63,23 @@ _DEFAULTS: dict[str, dict[str, Any]] = {
         "verification_notes": "",
     },
     "project_documents": {"title": "", "kind": "note", "content": "", "source": "manual"},
+    "schedules": {
+        "title": "",
+        "note": "",
+        "kind": "once",
+        "status": "active",
+        "source": "web",
+        "source_ref": {},
+        "channels": [],
+    },
+    "goals": {
+        "title": "",
+        "detail": "",
+        "status": "active",
+        "progress": 0,
+        "source": "web",
+        "source_ref": {},
+    },
 }
 
 
