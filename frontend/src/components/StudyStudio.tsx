@@ -6,6 +6,7 @@ import {
   BookOpen,
   CalendarCheck,
   Check,
+  ChevronDown,
   History,
   ListChecks,
   Pencil,
@@ -17,7 +18,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Markdown, MathText } from "@/components/Markdown";
@@ -56,6 +57,28 @@ function statusLabel(status: StudyStatus): string {
   if (status === "done") return "Selesai";
   if (status === "archived") return "Diarsipkan";
   return "Aktif";
+}
+
+type OutlineItem = { level: number; text: string };
+
+function buildOutline(markdown: string): OutlineItem[] {
+  const items: OutlineItem[] = [];
+  let inFence = false;
+  for (const line of markdown.split("\n")) {
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const match = /^(#{1,3})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (match) {
+      items.push({
+        level: match[1].length,
+        text: match[2].replace(/[*_`]/g, "").trim(),
+      });
+    }
+  }
+  return items;
 }
 
 const QUIZ_LEVEL_OPTIONS: { value: StudyQuizLevel; label: string }[] = [
@@ -616,6 +639,16 @@ function TopicDetail({
   const [current, setCurrent] = useState(0);
   const [shortOpen, setShortOpen] = useState<Set<number>>(new Set());
   const [confirmSubmit, setConfirmSubmit] = useState(false);
+  const materialRef = useRef<HTMLDivElement>(null);
+  const outline = useMemo(
+    () => buildOutline(topic.material),
+    [topic.material],
+  );
+
+  function scrollToHeading(index: number) {
+    const headings = materialRef.current?.querySelectorAll("h1, h2, h3");
+    headings?.[index]?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   const [editOpen, setEditOpen] = useState(false);
   const [editTitle, setEditTitle] = useState(topic.title);
   const [editSubject, setEditSubject] = useState(topic.subject);
@@ -863,77 +896,148 @@ function TopicDetail({
       </div>
 
       {tab === "materi" && (
-        <>
-          {/* Import source */}
-          <section className="mt-4 rounded-lg border border-border bg-surface p-4">
-            <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
-              <Upload size={13} aria-hidden /> Materi sumber
-            </h3>
-            <p className="mt-1 text-[12px] text-muted">
-              {topic.source_filename
-                ? `${topic.source_filename} · ${topic.source_chars.toLocaleString("id-ID")} karakter`
-                : "Impor PDF/TXT/MD agar materi dan soal mengikuti sumber aslinya."}
-            </p>
-            <label
-              className={`mt-2 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12px] text-muted transition-colors duration-150 hover:text-foreground ${
-                busy === "import" ? "opacity-50" : ""
-              }`}
-            >
-              <Upload size={12} aria-hidden />
-              {busy === "import" ? "Mengimpor..." : "Pilih file"}
-              <input
-                type="file"
-                accept=".pdf,.txt,.md,.markdown,.csv,.json"
-                className="sr-only"
-                disabled={busy === "import"}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) onImport(file);
-                  event.target.value = "";
-                }}
-              />
-            </label>
-          </section>
+        <div className="mt-4 grid gap-4 lg:grid-cols-[300px_minmax(0,1fr)]">
+          {/* Controls */}
+          <div className="space-y-3">
+            <section className="rounded-lg border border-border bg-surface">
+              <details className="group">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 px-4 py-3 text-[13px] font-medium uppercase tracking-wide text-muted [&::-webkit-details-marker]:hidden">
+                  <Upload size={13} aria-hidden /> Materi sumber
+                  <ChevronDown
+                    size={14}
+                    className="ml-auto transition-transform group-open:rotate-180"
+                    aria-hidden
+                  />
+                </summary>
+                <div className="px-4 pb-4">
+                  <p className="text-[12px] text-muted">
+                    {topic.source_filename
+                      ? `${topic.source_filename} · ${topic.source_chars.toLocaleString("id-ID")} karakter`
+                      : "Impor PDF/TXT/MD agar materi dan soal mengikuti sumber aslinya."}
+                  </p>
+                  <label
+                    className={`mt-2 inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-border px-2.5 text-[12px] text-muted transition-colors duration-150 hover:text-foreground ${
+                      busy === "import" ? "opacity-50" : ""
+                    }`}
+                  >
+                    <Upload size={12} aria-hidden />
+                    {busy === "import" ? "Mengimpor..." : "Pilih file"}
+                    <input
+                      type="file"
+                      accept=".pdf,.txt,.md,.markdown,.csv,.json"
+                      className="sr-only"
+                      disabled={busy === "import"}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) onImport(file);
+                        event.target.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+              </details>
+            </section>
 
-          {/* Material */}
-          <section className="mt-4 rounded-lg border border-border bg-surface p-4">
+            <section className="rounded-lg border border-border bg-surface p-4">
+              <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
+                <Sparkles size={13} aria-hidden /> Buat materi
+              </h3>
+              <label htmlFor="study-focus" className="mt-2 block text-[12px] text-muted">
+                Fokus materi (opsional)
+              </label>
+              <input
+                id="study-focus"
+                value={focus}
+                onChange={(event) => onFocus(event.target.value)}
+                placeholder="Contoh: fokus soal deret angka"
+                className={`mt-1 ${inputClass}`}
+              />
+              <button
+                type="button"
+                disabled={busy === "generate"}
+                onClick={onGenerate}
+                className={`mt-2 w-full ${primaryButton}`}
+              >
+                <Sparkles size={14} aria-hidden />
+                {busy === "generate"
+                  ? "Menyusun..."
+                  : topic.material
+                    ? "Buat ulang materi"
+                    : "Buat materi"}
+              </button>
+              {busy === "generate" && (
+                <div className="mt-3" role="status">
+                  <p className="text-[12px] text-muted">Menyusun materi belajar...</p>
+                  <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-muted">
+                    <div className="animate-nav-progress h-full w-1/3 rounded-full bg-foreground/60" />
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-lg border border-border bg-surface">
+              <details className="group">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 px-4 py-3 text-[13px] font-medium uppercase tracking-wide text-muted [&::-webkit-details-marker]:hidden">
+                  <Pencil size={13} aria-hidden /> Catatan pribadi
+                  <ChevronDown
+                    size={14}
+                    className="ml-auto transition-transform group-open:rotate-180"
+                    aria-hidden
+                  />
+                </summary>
+                <div className="px-4 pb-4">
+                  <textarea
+                    id="study-notes"
+                    value={notes}
+                    onChange={(event) => onNotes(event.target.value)}
+                    rows={3}
+                    placeholder="Rangkuman atau hal yang ingin diingat"
+                    className={inputClass}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy === "notes"}
+                    onClick={onSaveNotes}
+                    className={`mt-2 w-full ${chipClass}`}
+                  >
+                    Simpan catatan
+                  </button>
+                </div>
+              </details>
+            </section>
+
+            {outline.length > 0 && (
+              <section className="rounded-lg border border-border bg-surface p-4">
+                <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
+                  <ListChecks size={13} aria-hidden /> Daftar isi
+                </h3>
+                <ul className="mt-2 max-h-[50vh] overflow-y-auto">
+                  {outline.map((item, index) => (
+                    <li
+                      key={`${item.text}-${index}`}
+                      style={{ paddingLeft: `${(item.level - 1) * 12}px` }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => scrollToHeading(index)}
+                        className="block w-full truncate rounded px-2 py-1 text-left text-[12px] text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-foreground"
+                      >
+                        {item.text}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
+
+          {/* Reading pane */}
+          <section className="rounded-lg border border-border bg-surface p-4">
             <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
               <Sparkles size={13} aria-hidden /> Materi belajar
             </h3>
-            <div className="mt-2">
-              <label htmlFor="study-focus" className="block text-[12px] text-muted">
-                Fokus materi (opsional)
-              </label>
-              <div className="mt-1 flex flex-col gap-2 sm:flex-row">
-                <input
-                  id="study-focus"
-                  value={focus}
-                  onChange={(event) => onFocus(event.target.value)}
-                  placeholder="Contoh: fokus soal deret angka"
-                  className={inputClass}
-                />
-                <button
-                  type="button"
-                  disabled={busy === "generate"}
-                  onClick={onGenerate}
-                  className={`${primaryButton} shrink-0`}
-                >
-                  <Sparkles size={14} aria-hidden />
-                  {busy === "generate"
-                    ? "Menyusun..."
-                    : topic.material
-                      ? "Buat ulang materi"
-                      : "Buat materi"}
-                </button>
-              </div>
-            </div>
-            {busy === "generate" && (
-              <p className="mt-3 text-[13px] text-muted" role="status">
-                Menyusun materi belajar...
-              </p>
-            )}
             {topic.material ? (
-              <div className="mt-3">
+              <div ref={materialRef} className="mt-3">
                 <Markdown content={topic.material} />
               </div>
             ) : (
@@ -944,30 +1048,7 @@ function TopicDetail({
               )
             )}
           </section>
-
-          {/* Notes */}
-          <section className="mt-4 rounded-lg border border-border bg-surface p-4">
-            <label htmlFor="study-notes" className="block text-[12px] text-muted">
-              Catatan pribadi
-            </label>
-            <textarea
-              id="study-notes"
-              value={notes}
-              onChange={(event) => onNotes(event.target.value)}
-              rows={3}
-              placeholder="Rangkuman atau hal yang ingin diingat"
-              className={`mt-1 ${inputClass}`}
-            />
-            <button
-              type="button"
-              disabled={busy === "notes"}
-              onClick={onSaveNotes}
-              className={`mt-2 ${chipClass}`}
-            >
-              Simpan catatan
-            </button>
-          </section>
-        </>
+        </div>
       )}
 
       {tab === "kuis" && (
