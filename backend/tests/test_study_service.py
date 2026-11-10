@@ -5,7 +5,11 @@ from __future__ import annotations
 import asyncio
 
 from app.schemas import StudyReviewRequest, StudyTopicCreate, StudyTopicUpdate
-from app.services.study_service import StudyService, build_prompt
+from app.services.study_service import (
+    StudyService,
+    _parse_json_array,
+    build_prompt,
+)
 from tests.fake_supabase import FakeClient
 
 
@@ -93,6 +97,30 @@ def test_build_prompt_includes_fields() -> None:
     text = build_prompt(topic)
     assert "Pancasila" in text
     assert "Hafal sila" in text
+
+
+def test_parse_json_array_repairs_latex_escapes() -> None:
+    # Models emit `\(` (invalid JSON escape) when told to use LaTeX delimiters.
+    raw = (
+        r'[{"question":"Q","options":["\(a\)","\(b\)"],"answer":0,'
+        r'"explanation":"\(a\) benar"}]'
+    )
+    parsed = _parse_json_array(raw)
+    assert parsed is not None and len(parsed) == 1
+    assert parsed[0]["options"][0] == r"\(a\)"
+    # Valid double-backslash commands must be preserved.
+    assert _parse_json_array(
+        r'[{"q":"a","options":["\\times","b"],"answer":0,"explanation":"x"}]'
+    )[0]["options"][0] == "\\times"
+
+
+def test_parse_json_array_salvages_truncated_reply() -> None:
+    raw = (
+        '[{"question":"Q1","options":["a","b"],"answer":0,"explanation":"e"},'
+        '{"question":"Q2","options":["a","b"],"answer":0,"expl"'
+    )
+    parsed = _parse_json_array(raw)
+    assert parsed is not None and [item["question"] for item in parsed] == ["Q1"]
 
 
 def test_generate_quiz_parses_and_grades() -> None:
