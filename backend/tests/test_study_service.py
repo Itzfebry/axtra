@@ -126,6 +126,31 @@ def test_generate_quiz_parses_and_grades() -> None:
     asyncio.run(run())
 
 
+def test_quiz_count_and_difficulty_escalates() -> None:
+    async def run() -> None:
+        client = FakeClient()
+        service = StudyService(client)  # type: ignore[arg-type]
+        topic = await service.create(USER, StudyTopicCreate(title="TWK"))
+
+        reply = (
+            '[{"question":"Q","options":["a","b"],"answer":0,"explanation":"e"}]'
+        )
+        first = FakeLLM(reply)
+        await service.generate_quiz(
+            USER, topic.id, first, "m", count=10  # type: ignore[arg-type]
+        )
+        prompt = first.requests[0].messages[-1].content
+        assert "JUMLAH SOAL: 10" in prompt
+        assert "mudah" in prompt
+
+        await service.grade_quiz(USER, topic.id, [0])
+        second = FakeLLM(reply)
+        await service.generate_quiz(USER, topic.id, second, "m")  # type: ignore[arg-type]
+        assert "sedang" in second.requests[0].messages[-1].content
+
+    asyncio.run(run())
+
+
 def test_import_source_feeds_prompt() -> None:
     async def run() -> None:
         client = FakeClient()

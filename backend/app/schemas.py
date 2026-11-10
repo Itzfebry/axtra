@@ -1184,6 +1184,10 @@ class StudyGenerateRequest(BaseModel):
     focus: str = Field(default="", max_length=1000)
 
 
+class StudyQuizRequest(BaseModel):
+    count: int = Field(default=5, ge=3, le=20)
+
+
 class StudyQuizQuestion(BaseModel):
     question: str = ""
     options: list[str] = Field(default_factory=list)

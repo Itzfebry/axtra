@@ -2330,8 +2330,14 @@ export async function importStudyMaterial(
   return data as StudyTopic;
 }
 
-export async function generateStudyQuiz(id: string): Promise<StudyTopic> {
-  return apiFetch<StudyTopic>(`/study/${id}/quiz`, { method: "POST" });
+export async function generateStudyQuiz(
+  id: string,
+  count = 5,
+): Promise<StudyTopic> {
+  return apiFetch<StudyTopic>(`/study/${id}/quiz`, {
+    method: "POST",
+    body: JSON.stringify({ count }),
+  });
 }
 
 export async function gradeStudyQuiz(

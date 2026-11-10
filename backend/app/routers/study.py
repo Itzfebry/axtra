@@ -21,6 +21,7 @@ from app.schemas import (
     StudyGenerateRequest,
     StudyGradeOut,
     StudyGradeRequest,
+    StudyQuizRequest,
     StudyReviewRequest,
     StudyTopicCreate,
     StudyTopicOut,
@@ -143,14 +144,21 @@ async def generate_material(
 
 @router.post("/{topic_id}/quiz", response_model=StudyTopicOut)
 async def generate_quiz(
-    topic_id: uuid.UUID, user: CurrentUser = Depends(rate_limit)
+    topic_id: uuid.UUID,
+    payload: StudyQuizRequest | None = None,
+    user: CurrentUser = Depends(rate_limit),
 ) -> StudyTopicOut:
     settings = get_settings()
     try:
         llm, model = await resolve_active_llm(settings, user.client, user.id)
         persona = await load_feature_persona(user.client, "study", user_id=user.id)
         return await StudyService(user.client).generate_quiz(
-            user.id, str(topic_id), llm, model, persona=persona
+            user.id,
+            str(topic_id),
+            llm,
+            model,
+            count=payload.count if payload else 5,
+            persona=persona,
         )
     except KeyError as exc:
         raise _not_found() from exc

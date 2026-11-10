@@ -53,6 +53,13 @@ function statusLabel(status: StudyStatus): string {
   return "Aktif";
 }
 
+const QUIZ_LEVELS = ["Mudah", "Sedang", "Sulit", "Sangat sulit", "Olimpiade"];
+
+/** Next quiz tier, climbing one step per finished attempt. */
+function difficultyLabel(attempts: number): string {
+  return QUIZ_LEVELS[Math.min(attempts, QUIZ_LEVELS.length - 1)];
+}
+
 function formatDate(iso: string | null): string {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString("id-ID", {
@@ -378,10 +385,10 @@ export function StudyStudio() {
                 "Materi belajar dibuat.",
               )
             }
-            onQuiz={() =>
+            onQuiz={(count) =>
               void run(
                 "quiz",
-                () => generateStudyQuiz(selected.id),
+                () => generateStudyQuiz(selected.id, count),
                 "Kuis dibuat. Jawab lalu periksa.",
               )
             }
@@ -541,7 +548,7 @@ function TopicDetail({
   onTarget: (value: string) => void;
   onImport: (file: File) => void;
   onGenerate: () => void;
-  onQuiz: () => void;
+  onQuiz: (count: number) => void;
   onSubmitQuiz: () => void;
   onPlan: () => void;
   onReview: (days: number) => void;
@@ -550,6 +557,7 @@ function TopicDetail({
 }) {
   const currentDay = todayIndex(topic);
   const [tab, setTab] = useState<"materi" | "kuis" | "rencana">("materi");
+  const [quizCount, setQuizCount] = useState(5);
   const [editOpen, setEditOpen] = useState(false);
   const [editTitle, setEditTitle] = useState(topic.title);
   const [editSubject, setEditSubject] = useState(topic.subject);
@@ -899,15 +907,49 @@ function TopicDetail({
               <button
                 type="button"
                 disabled={busy === "quiz"}
-                onClick={onQuiz}
-                className={chipClass}
+                onClick={() => onQuiz(quizCount)}
+                className={primaryButton}
               >
+                <Sparkles size={14} aria-hidden />
                 {busy === "quiz"
                   ? "Menyusun..."
                   : topic.quiz.length
                     ? "Buat ulang kuis"
                     : "Buat kuis"}
               </button>
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <span className="text-[12px] text-muted">Jumlah soal</span>
+              <div className="flex items-center gap-1.5">
+                {[5, 10, 15].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setQuizCount(value)}
+                    aria-pressed={quizCount === value}
+                    className={`inline-flex h-7 items-center rounded-lg border px-2.5 text-[12px] ${
+                      quizCount === value
+                        ? "border-foreground/40 bg-surface-muted text-foreground"
+                        : "border-border text-muted hover:text-foreground"
+                    }`}
+                  >
+                    {value}
+                  </button>
+                ))}
+              </div>
+              <span className="text-[12px] text-muted">
+                Tingkat:{" "}
+                <span className="text-foreground">
+                  {difficultyLabel(topic.quiz_history.length)}
+                </span>
+                {topic.quiz_history.length > 0 && (
+                  <span className="text-muted">
+                    {" "}
+                    (naik tiap percobaan)
+                  </span>
+                )}
+              </span>
             </div>
 
             {topic.quiz.length === 0 ? (
