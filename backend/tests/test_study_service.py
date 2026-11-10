@@ -185,6 +185,42 @@ def test_quiz_distribution_and_level_setting() -> None:
     asyncio.run(run())
 
 
+def test_explain_question_caches_result() -> None:
+    async def run() -> None:
+        client = FakeClient()
+        service = StudyService(client)  # type: ignore[arg-type]
+        topic = await service.create(USER, StudyTopicCreate(title="TWK"))
+        reply = (
+            '[{"question":"Q","options":["a","b"],"answer":0,"explanation":"e"}]'
+        )
+        await service.generate_quiz(
+            USER, topic.id, FakeLLM(reply), "m"  # type: ignore[arg-type]
+        )
+
+        first = FakeLLM("Penjelasan detail.")
+        text = await service.explain_question(
+            USER, topic.id, first, "m", 0  # type: ignore[arg-type]
+        )
+        assert text == "Penjelasan detail."
+        assert first.requests
+
+        # Cached: a second click must not call the model again.
+        second = FakeLLM("lain")
+        assert (
+            await service.explain_question(
+                USER, topic.id, second, "m", 0  # type: ignore[arg-type]
+            )
+            == "Penjelasan detail."
+        )
+        assert not second.requests
+
+        refreshed = await service.get(USER, topic.id)
+        assert refreshed is not None
+        assert refreshed.quiz[0].detail == "Penjelasan detail."
+
+    asyncio.run(run())
+
+
 def test_import_source_feeds_prompt() -> None:
     async def run() -> None:
         client = FakeClient()

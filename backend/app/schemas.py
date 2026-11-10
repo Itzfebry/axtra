@@ -1189,11 +1189,20 @@ class StudyQuizRequest(BaseModel):
     level: Literal["campuran", "mudah", "sedang", "sulit"] = "campuran"
 
 
+class StudyExplainRequest(BaseModel):
+    index: int = Field(default=0, ge=0, le=19)
+
+
+class StudyExplainOut(BaseModel):
+    explanation: str = ""
+
+
 class StudyQuizQuestion(BaseModel):
     question: str = ""
     options: list[str] = Field(default_factory=list)
     answer: int = 0
     explanation: str = ""
+    detail: str = ""
 
 
 class StudyPlanItem(BaseModel):

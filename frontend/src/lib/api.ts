@@ -2207,6 +2207,7 @@ export type StudyQuizQuestion = {
   options: string[];
   answer: number;
   explanation: string;
+  detail: string;
 };
 
 export type StudyPlanItem = {
@@ -2350,6 +2351,16 @@ export async function gradeStudyQuiz(
   return apiFetch<StudyGradeResult>(`/study/${id}/quiz/grade`, {
     method: "POST",
     body: JSON.stringify({ answers }),
+  });
+}
+
+export async function explainStudyQuestion(
+  id: string,
+  index: number,
+): Promise<{ explanation: string }> {
+  return apiFetch<{ explanation: string }>(`/study/${id}/quiz/explain`, {
+    method: "POST",
+    body: JSON.stringify({ index }),
   });
 }
 

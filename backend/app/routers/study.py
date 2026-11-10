@@ -18,6 +18,8 @@ from app.config import Settings, get_settings
 from app.deps import CurrentUser, rate_limit, read_rate_limit
 from app.llm import LLMProviderError
 from app.schemas import (
+    StudyExplainOut,
+    StudyExplainRequest,
     StudyGenerateRequest,
     StudyGradeOut,
     StudyGradeRequest,
@@ -181,6 +183,36 @@ async def grade_quiz(
         )
     except KeyError as exc:
         raise _not_found() from exc
+
+
+@router.post("/{topic_id}/quiz/explain", response_model=StudyExplainOut)
+async def explain_question(
+    topic_id: uuid.UUID,
+    payload: StudyExplainRequest,
+    user: CurrentUser = Depends(rate_limit),
+) -> StudyExplainOut:
+    """Generate (and cache) a detailed explanation for one quiz question."""
+    settings = get_settings()
+    try:
+        llm, model = await resolve_active_llm(settings, user.client, user.id)
+        persona = await load_feature_persona(user.client, "study", user_id=user.id)
+        explanation = await StudyService(user.client).explain_question(
+            user.id,
+            str(topic_id),
+            llm,
+            model,
+            payload.index,
+            persona=persona,
+        )
+        return StudyExplainOut(explanation=explanation)
+    except KeyError as exc:
+        raise _not_found() from exc
+    except IndexError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="Nomor soal tidak valid."
+        ) from exc
+    except LLMProviderError as exc:
+        raise _llm_error(exc) from exc
 
 
 @router.post("/{topic_id}/plan", response_model=StudyTopicOut)

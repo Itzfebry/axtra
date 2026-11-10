@@ -24,6 +24,7 @@ import { Markdown, MathText } from "@/components/Markdown";
 import {
   createStudyTopic,
   deleteStudyTopic,
+  explainStudyQuestion,
   generateStudyMaterial,
   generateStudyPlan,
   generateStudyQuiz,
@@ -189,6 +190,26 @@ export function StudyStudio() {
       setNotice(`Skor kuis: ${result.score}% (${result.correct}/${result.total}).`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Gagal menilai kuis.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function explain(topic: StudyTopic, index: number) {
+    if (topic.quiz[index]?.detail) return;
+    setBusy("explain");
+    setError(null);
+    setNotice(null);
+    try {
+      const { explanation } = await explainStudyQuestion(topic.id, index);
+      replaceTopic({
+        ...topic,
+        quiz: topic.quiz.map((question, qIndex) =>
+          qIndex === index ? { ...question, detail: explanation } : question,
+        ),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Gagal membuat penjelasan.");
     } finally {
       setBusy(null);
     }
@@ -395,6 +416,7 @@ export function StudyStudio() {
               )
             }
             onSubmitQuiz={() => void submitQuiz(selected)}
+            onExplain={(index) => void explain(selected, index)}
             onPlan={() =>
               void run(
                 "plan",
@@ -545,6 +567,7 @@ function TopicDetail({
   onGenerate,
   onQuiz,
   onSubmitQuiz,
+  onExplain,
   onPlan,
   onReview,
   onGoal,
@@ -569,6 +592,7 @@ function TopicDetail({
   onGenerate: () => void;
   onQuiz: (count: number, level: StudyQuizLevel) => void;
   onSubmitQuiz: () => void;
+  onExplain: (index: number) => void;
   onPlan: () => void;
   onReview: (days: number) => void;
   onGoal: () => void;
@@ -1146,14 +1170,27 @@ function TopicDetail({
                     })}
                   </div>
 
-                  {activeResult && (
-                    <div className="mt-3 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[13px]">
-                      <span className="font-medium">
-                        {activeResult.correct ? "Benar. " : "Salah. "}
-                      </span>
-                      <span className="text-muted">
-                        <MathText content={activeResult.explanation} />
-                      </span>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={
+                        busy === "explain" || Boolean(activeQuestion.detail)
+                      }
+                      onClick={() => onExplain(current)}
+                      className={chipClass}
+                    >
+                      <Sparkles size={12} aria-hidden />
+                      {busy === "explain"
+                        ? "Menjelaskan..."
+                        : activeQuestion.detail
+                          ? "Sudah dijelaskan"
+                          : "Jelaskan"}
+                    </button>
+                  </div>
+
+                  {activeQuestion.detail && (
+                    <div className="mt-2 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[13px]">
+                      <Markdown content={activeQuestion.detail} />
                     </div>
                   )}
 
