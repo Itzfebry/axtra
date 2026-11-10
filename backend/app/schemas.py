@@ -1232,6 +1232,8 @@ class StudyQuizAttempt(BaseModel):
     score: int = 0
     correct: int = 0
     total: int = 0
+    count: int = 0
+    level: str = ""
     at: datetime | None = None
 
 
@@ -1252,6 +1254,8 @@ class StudyTopicOut(BaseModel):
     source_filename: str = ""
     source_chars: int = 0
     quiz: list[StudyQuizQuestion] = Field(default_factory=list)
+    quiz_count: int = 5
+    quiz_level: str = "campuran"
     quiz_history: list[StudyQuizAttempt] = Field(default_factory=list)
     plan: list[StudyPlanItem] = Field(default_factory=list)
     target_date: date | None = None

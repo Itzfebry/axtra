@@ -215,6 +215,25 @@ async def explain_question(
         raise _llm_error(exc) from exc
 
 
+@router.delete("/{topic_id}/quiz/history/{index}", response_model=StudyTopicOut)
+async def delete_quiz_history(
+    topic_id: uuid.UUID,
+    index: int,
+    user: CurrentUser = Depends(rate_limit),
+) -> StudyTopicOut:
+    """Delete one quiz-history entry by its stored index."""
+    try:
+        return await StudyService(user.client).delete_history(
+            user.id, str(topic_id), index
+        )
+    except KeyError as exc:
+        raise _not_found() from exc
+    except IndexError as exc:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="Riwayat tidak ditemukan."
+        ) from exc
+
+
 @router.post("/{topic_id}/plan", response_model=StudyTopicOut)
 async def generate_plan(
     topic_id: uuid.UUID, user: CurrentUser = Depends(rate_limit)

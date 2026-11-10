@@ -154,6 +154,44 @@ def test_generate_quiz_parses_and_grades() -> None:
     asyncio.run(run())
 
 
+def test_quiz_history_config_and_delete() -> None:
+    async def run() -> None:
+        client = FakeClient()
+        service = StudyService(client)  # type: ignore[arg-type]
+        topic = await service.create(USER, StudyTopicCreate(title="TWK"))
+        reply = (
+            '[{"question":"Q","options":["a","b"],"answer":0,"explanation":"e"}]'
+        )
+        quizzed = await service.generate_quiz(
+            USER,
+            topic.id,
+            FakeLLM(reply),
+            "m",  # type: ignore[arg-type]
+            count=10,
+            level="sulit",
+        )
+        assert quizzed.quiz_count == 10
+        assert quizzed.quiz_level == "sulit"
+
+        await service.grade_quiz(USER, topic.id, [0])
+        refreshed = await service.get(USER, topic.id)
+        assert refreshed is not None
+        attempt = refreshed.quiz_history[-1]
+        assert attempt.count == 10
+        assert attempt.level == "sulit"
+
+        after = await service.delete_history(USER, topic.id, 0)
+        assert after.quiz_history == []
+        try:
+            await service.delete_history(USER, topic.id, 0)
+        except IndexError:
+            pass
+        else:  # pragma: no cover - guard against silent no-op
+            raise AssertionError("expected IndexError")
+
+    asyncio.run(run())
+
+
 def test_quiz_distribution_and_level_setting() -> None:
     async def run() -> None:
         client = FakeClient()

@@ -23,6 +23,7 @@ import { LoadingState } from "@/components/ui/LoadingState";
 import { Markdown, MathText } from "@/components/Markdown";
 import {
   createStudyTopic,
+  deleteStudyQuizHistory,
   deleteStudyTopic,
   explainStudyQuestion,
   generateStudyMaterial,
@@ -417,6 +418,13 @@ export function StudyStudio() {
             }
             onSubmitQuiz={() => void submitQuiz(selected)}
             onExplain={(index) => void explain(selected, index)}
+            onDeleteHistory={(index) =>
+              void run(
+                "history-delete",
+                () => deleteStudyQuizHistory(selected.id, index),
+                "Riwayat dihapus.",
+              )
+            }
             onPlan={() =>
               void run(
                 "plan",
@@ -568,6 +576,7 @@ function TopicDetail({
   onQuiz,
   onSubmitQuiz,
   onExplain,
+  onDeleteHistory,
   onPlan,
   onReview,
   onGoal,
@@ -593,6 +602,7 @@ function TopicDetail({
   onQuiz: (count: number, level: StudyQuizLevel) => void;
   onSubmitQuiz: () => void;
   onExplain: (index: number) => void;
+  onDeleteHistory: (index: number) => void;
   onPlan: () => void;
   onReview: (days: number) => void;
   onGoal: () => void;
@@ -603,6 +613,7 @@ function TopicDetail({
   const [quizCount, setQuizCount] = useState(5);
   const [quizLevel, setQuizLevel] = useState<StudyQuizLevel>("campuran");
   const [current, setCurrent] = useState(0);
+  const [shortOpen, setShortOpen] = useState<Set<number>>(new Set());
   const [editOpen, setEditOpen] = useState(false);
   const [editTitle, setEditTitle] = useState(topic.title);
   const [editSubject, setEditSubject] = useState(topic.subject);
@@ -614,6 +625,7 @@ function TopicDetail({
     setEditGoal(topic.goal);
     setEditOpen(false);
     setCurrent(0);
+    setShortOpen(new Set());
   }, [topic.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -1170,7 +1182,22 @@ function TopicDetail({
                     })}
                   </div>
 
-                  <div className="mt-3 flex items-center gap-2">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShortOpen((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(current)) next.delete(current);
+                          else next.add(current);
+                          return next;
+                        })
+                      }
+                      className={chipClass}
+                    >
+                      <BookOpen size={12} aria-hidden />
+                      {shortOpen.has(current) ? "Sembunyikan" : "Jelaskan"}
+                    </button>
                     <button
                       type="button"
                       disabled={
@@ -1183,10 +1210,16 @@ function TopicDetail({
                       {busy === "explain"
                         ? "Menjelaskan..."
                         : activeQuestion.detail
-                          ? "Sudah dijelaskan"
-                          : "Jelaskan"}
+                          ? "Penjelasan lengkap siap"
+                          : "Penjelasan Lengkap"}
                     </button>
                   </div>
+
+                  {shortOpen.has(current) && activeQuestion.explanation && (
+                    <div className="mt-2 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[13px] text-muted">
+                      <MathText content={activeQuestion.explanation} />
+                    </div>
+                  )}
 
                   {activeQuestion.detail && (
                     <div className="mt-2 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[13px]">
@@ -1230,38 +1263,60 @@ function TopicDetail({
               </p>
             ) : (
               <ul className="mt-3 divide-y divide-border">
-                {[...topic.quiz_history].reverse().map((attempt, index) => (
-                  <li
-                    key={index}
-                    className="flex items-center justify-between gap-3 py-2 text-[13px]"
-                  >
-                    <span className="text-muted">
-                      {attempt.at
-                        ? new Date(attempt.at).toLocaleString("id-ID", {
-                            day: "2-digit",
-                            month: "short",
-                            year: "numeric",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "—"}
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <span className="text-muted">
-                        {attempt.correct}/{attempt.total}
+                {[...topic.quiz_history].reverse().map((attempt, index) => {
+                  const realIndex = topic.quiz_history.length - 1 - index;
+                  const levelLabel =
+                    QUIZ_LEVEL_OPTIONS.find(
+                      (option) => option.value === attempt.level,
+                    )?.label ?? attempt.level;
+                  return (
+                    <li
+                      key={realIndex}
+                      className="flex items-center justify-between gap-3 py-2 text-[13px]"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-muted">
+                          {attempt.at
+                            ? new Date(attempt.at).toLocaleString("id-ID", {
+                                day: "2-digit",
+                                month: "short",
+                                year: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })
+                            : "—"}
+                        </span>
+                        <span className="mt-0.5 block truncate text-[12px] text-muted">
+                          {attempt.count > 0 ? `${attempt.count} soal` : "—"}
+                          {levelLabel ? ` · ${levelLabel}` : ""}
+                        </span>
                       </span>
-                      <span
-                        className={`rounded border px-1.5 py-0.5 text-[12px] ${
-                          attempt.score >= 70
-                            ? "border-success/50 text-success"
-                            : "border-border text-muted"
-                        }`}
-                      >
-                        {attempt.score}%
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="text-muted">
+                          {attempt.correct}/{attempt.total}
+                        </span>
+                        <span
+                          className={`rounded border px-1.5 py-0.5 text-[12px] ${
+                            attempt.score >= 70
+                              ? "border-success/50 text-success"
+                              : "border-border text-muted"
+                          }`}
+                        >
+                          {attempt.score}%
+                        </span>
+                        <button
+                          type="button"
+                          disabled={busy === "history-delete"}
+                          onClick={() => onDeleteHistory(realIndex)}
+                          aria-label="Hapus riwayat"
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-border text-muted transition-colors duration-150 hover:text-danger disabled:opacity-40"
+                        >
+                          <Trash2 size={12} aria-hidden />
+                        </button>
                       </span>
-                    </span>
-                  </li>
-                ))}
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>

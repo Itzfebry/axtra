@@ -213,6 +213,8 @@ def _out(row: dict[str, Any]) -> StudyTopicOut:
         source_filename=row.get("source_filename") or "",
         source_chars=len(row.get("source_text") or ""),
         quiz=quiz,
+        quiz_count=int(row.get("quiz_count") or 5),
+        quiz_level=row.get("quiz_level") or "campuran",
         quiz_history=history,
         plan=plan,
         target_date=row.get("target_date"),
@@ -513,7 +515,11 @@ class StudyService:
             )
         if not questions:
             raise ValueError("Model tidak menghasilkan soal yang valid.")
-        return await self._patch(user_id, topic_id, {"quiz": questions})
+        return await self._patch(
+            user_id,
+            topic_id,
+            {"quiz": questions, "quiz_count": count, "quiz_level": level},
+        )
 
     async def grade_quiz(
         self, user_id: str, topic_id: str, answers: list[int]
@@ -542,6 +548,8 @@ class StudyService:
                 "score": score,
                 "correct": correct,
                 "total": total,
+                "count": topic.quiz_count,
+                "level": topic.quiz_level,
                 "at": datetime.now(timezone.utc).isoformat(),
             }
             history = [item.model_dump(mode="json") for item in topic.quiz_history]
@@ -560,6 +568,19 @@ class StudyService:
         return StudyGradeOut(
             total=total, correct=correct, score=score, results=results
         )
+
+    async def delete_history(
+        self, user_id: str, topic_id: str, index: int
+    ) -> StudyTopicOut:
+        """Remove one quiz-history entry (index into the stored array)."""
+        topic = await self.get(user_id, topic_id)
+        if topic is None:
+            raise KeyError("study_not_found")
+        history = [item.model_dump(mode="json") for item in topic.quiz_history]
+        if index < 0 or index >= len(history):
+            raise IndexError("study_history_index")
+        del history[index]
+        return await self._patch(user_id, topic_id, {"quiz_history": history})
 
     async def explain_question(
         self,

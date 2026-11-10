@@ -2220,6 +2220,8 @@ export type StudyQuizAttempt = {
   score: number;
   correct: number;
   total: number;
+  count: number;
+  level: string;
   at: string | null;
 };
 
@@ -2243,6 +2245,8 @@ export type StudyTopic = {
   source_filename: string;
   source_chars: number;
   quiz: StudyQuizQuestion[];
+  quiz_count: number;
+  quiz_level: StudyQuizLevel;
   quiz_history: StudyQuizAttempt[];
   plan: StudyPlanItem[];
   target_date: string | null;
@@ -2361,6 +2365,15 @@ export async function explainStudyQuestion(
   return apiFetch<{ explanation: string }>(`/study/${id}/quiz/explain`, {
     method: "POST",
     body: JSON.stringify({ index }),
+  });
+}
+
+export async function deleteStudyQuizHistory(
+  id: string,
+  index: number,
+): Promise<StudyTopic> {
+  return apiFetch<StudyTopic>(`/study/${id}/quiz/history/${index}`, {
+    method: "DELETE",
   });
 }
 
