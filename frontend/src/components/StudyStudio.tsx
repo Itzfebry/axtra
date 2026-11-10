@@ -971,23 +971,60 @@ function TopicDetail({
       {tab === "kuis" && (
         <>
           <section className="mt-4 rounded-lg border border-border bg-surface p-4">
-            <div className="flex items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="flex items-center gap-1.5 text-[13px] font-medium uppercase tracking-wide text-muted">
                 <ListChecks size={13} aria-hidden /> Kuis
               </h3>
-              <button
-                type="button"
-                disabled={busy === "quiz"}
-                onClick={() => onQuiz(quizCount, quizLevel)}
-                className={primaryButton}
-              >
-                <Sparkles size={14} aria-hidden />
-                {busy === "quiz"
-                  ? "Menyusun..."
-                  : topic.quiz.length
-                    ? "Buat ulang kuis"
-                    : "Buat kuis"}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                {topic.quiz.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShortOpen((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(current)) next.delete(current);
+                          else next.add(current);
+                          return next;
+                        })
+                      }
+                      className={chipClass}
+                    >
+                      <BookOpen size={12} aria-hidden />
+                      {shortOpen.has(current) ? "Sembunyikan" : "Jelaskan"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={
+                        busy === "explain" ||
+                        Boolean(topic.quiz[current]?.detail)
+                      }
+                      onClick={() => onExplain(current)}
+                      className={chipClass}
+                    >
+                      <Sparkles size={12} aria-hidden />
+                      {busy === "explain"
+                        ? "Menjelaskan..."
+                        : topic.quiz[current]?.detail
+                          ? "Penjelasan lengkap siap"
+                          : "Penjelasan Lengkap"}
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  disabled={busy === "quiz"}
+                  onClick={() => onQuiz(quizCount, quizLevel)}
+                  className={primaryButton}
+                >
+                  <Sparkles size={14} aria-hidden />
+                  {busy === "quiz"
+                    ? "Menyusun..."
+                    : topic.quiz.length
+                      ? "Buat ulang kuis"
+                      : "Buat kuis"}
+                </button>
+              </div>
             </div>
 
             <div className="mt-3 space-y-2">
@@ -1182,41 +1219,8 @@ function TopicDetail({
                     })}
                   </div>
 
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setShortOpen((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(current)) next.delete(current);
-                          else next.add(current);
-                          return next;
-                        })
-                      }
-                      className={chipClass}
-                    >
-                      <BookOpen size={12} aria-hidden />
-                      {shortOpen.has(current) ? "Sembunyikan" : "Jelaskan"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={
-                        busy === "explain" || Boolean(activeQuestion.detail)
-                      }
-                      onClick={() => onExplain(current)}
-                      className={chipClass}
-                    >
-                      <Sparkles size={12} aria-hidden />
-                      {busy === "explain"
-                        ? "Menjelaskan..."
-                        : activeQuestion.detail
-                          ? "Penjelasan lengkap siap"
-                          : "Penjelasan Lengkap"}
-                    </button>
-                  </div>
-
                   {shortOpen.has(current) && activeQuestion.explanation && (
-                    <div className="mt-2 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[13px] text-muted">
+                    <div className="mt-3 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[13px] text-muted">
                       <MathText content={activeQuestion.explanation} />
                     </div>
                   )}
