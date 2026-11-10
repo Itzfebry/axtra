@@ -2,6 +2,7 @@
 
 import {
   ArrowLeft,
+  ArrowRight,
   BookOpen,
   CalendarCheck,
   Check,
@@ -215,7 +216,7 @@ export function StudyStudio() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <div className="mx-auto w-full max-w-3xl px-4 py-6 pb-16">
+      <div className="mx-auto w-full max-w-6xl px-4 py-6 pb-16 md:px-8">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight font-brand">
@@ -481,29 +482,46 @@ function TopicList({
   onOpen: (topic: StudyTopic) => void;
 }) {
   return (
-    <ul className="mt-2 divide-y divide-border rounded-lg border border-border">
+    <div className="mt-2 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {topics.map((topic) => (
-        <li key={topic.id}>
-          <button
-            type="button"
-            onClick={() => onOpen(topic)}
-            className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-surface-muted"
-          >
-            <BookOpen size={16} className="shrink-0 text-muted" aria-hidden />
+        <button
+          key={topic.id}
+          type="button"
+          onClick={() => onOpen(topic)}
+          className="flex flex-col gap-2 rounded-lg border border-border bg-surface p-3 text-left transition-colors duration-150 hover:bg-surface-muted"
+        >
+          <span className="flex items-start gap-2">
+            <BookOpen size={16} className="mt-0.5 shrink-0 text-muted" aria-hidden />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[14px]">{topic.title}</span>
-              <span className="block truncate text-[12px] text-muted">
-                {[topic.subject, topic.goal].filter(Boolean).join(" · ") ||
-                  "Belum ada detail"}
+              <span className="block truncate text-[14px] font-medium">
+                {topic.title}
               </span>
+              <span className="mt-0.5 block truncate text-[12px] text-muted">
+                {[topic.subject, statusLabel(topic.status)]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            </span>
+          </span>
+          {topic.goal && (
+            <span className="line-clamp-2 text-[12px] text-muted">
+              {topic.goal}
+            </span>
+          )}
+          <span className="mt-auto flex items-center gap-2">
+            <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-muted">
+              <span
+                className="block h-full bg-primary"
+                style={{ width: `${topic.progress}%` }}
+              />
             </span>
             <span className="shrink-0 text-[11px] text-muted">
               {topic.progress}%
             </span>
-          </button>
-        </li>
+          </span>
+        </button>
       ))}
-    </ul>
+    </div>
   );
 }
 
@@ -560,6 +578,7 @@ function TopicDetail({
   const [tab, setTab] = useState<"materi" | "kuis" | "rencana">("materi");
   const [quizCount, setQuizCount] = useState(5);
   const [quizLevel, setQuizLevel] = useState<StudyQuizLevel>("campuran");
+  const [current, setCurrent] = useState(0);
   const [editOpen, setEditOpen] = useState(false);
   const [editTitle, setEditTitle] = useState(topic.title);
   const [editSubject, setEditSubject] = useState(topic.subject);
@@ -570,7 +589,14 @@ function TopicDetail({
     setEditSubject(topic.subject);
     setEditGoal(topic.goal);
     setEditOpen(false);
+    setCurrent(0);
   }, [topic.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setCurrent((value) =>
+      Math.min(value, Math.max(0, topic.quiz.length - 1)),
+    );
+  }, [topic.quiz.length]);
 
   function saveInfo() {
     const nextTitle = editTitle.trim();
@@ -582,6 +608,13 @@ function TopicDetail({
     });
     setEditOpen(false);
   }
+
+  const total = topic.quiz.length;
+  const answeredCount = answers.filter(
+    (value, index) => index < total && value !== undefined,
+  ).length;
+  const activeQuestion = topic.quiz[current];
+  const activeResult = grade?.results[current];
 
   return (
     <div className="mt-4">
@@ -975,74 +1008,176 @@ function TopicDetail({
                 sumber dulu agar soal lebih akurat.
               </p>
             ) : (
-              <div className="mt-3 space-y-4">
-                {topic.quiz.map((question, qIndex) => {
-                  const result = grade?.results[qIndex];
-                  return (
-                    <div key={qIndex}>
-                      <p className="text-[13px] font-medium">
-                        {qIndex + 1}. <MathText content={question.question} />
-                      </p>
-                      <div className="mt-1.5 space-y-1">
-                        {question.options.map((option, oIndex) => {
-                          const picked = answers[qIndex] === oIndex;
-                          const correctOption = result && result.answer === oIndex;
-                          const wrongPick = result && picked && !result.correct;
-                          return (
-                            <label
-                              key={oIndex}
-                              className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[13px] ${
-                                correctOption
-                                  ? "border-success/50 text-foreground"
-                                  : wrongPick
-                                    ? "border-danger/50 text-danger"
-                                    : picked
-                                      ? "border-foreground/40 bg-surface-muted text-foreground"
-                                      : "border-border text-muted"
-                              }`}
-                            >
-                              <input
-                                type="radio"
-                                name={`q-${topic.id}-${qIndex}`}
-                                checked={picked}
-                                onChange={() => onAnswer(qIndex, oIndex)}
-                                className="h-3.5 w-3.5 shrink-0 accent-foreground"
-                              />
-                              <span className="min-w-0">
-                                <MathText content={option} />
-                              </span>
-                            </label>
-                          );
-                        })}
-                      </div>
-                      {result && (
-                        <p className="mt-1.5 text-[12px] text-muted">
-                          {result.correct ? "Benar. " : "Salah. "}
-                          <MathText content={result.explanation} />
+              <div className="mt-4 grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+                <aside className="rounded-lg border border-border bg-surface p-3 lg:sticky lg:top-4 lg:self-start">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-[12px] font-medium uppercase tracking-wide text-muted">
+                      Bank soal
+                    </h4>
+                    <span className="text-[11px] text-muted">
+                      {answeredCount}/{total}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-6 gap-1.5 lg:grid-cols-5">
+                    {topic.quiz.map((_, index) => {
+                      const result = grade?.results[index];
+                      const answered = answers[index] !== undefined;
+                      let tone =
+                        "border-border text-muted hover:text-foreground";
+                      if (result) {
+                        tone = result.correct
+                          ? "border-success/60 bg-success/10 text-success"
+                          : "border-danger/60 bg-danger/10 text-danger";
+                      } else if (answered) {
+                        tone = "border-primary/50 bg-primary/10 text-foreground";
+                      } else if (index === current) {
+                        tone = "border-foreground/40 text-foreground";
+                      }
+                      return (
+                        <button
+                          key={index}
+                          type="button"
+                          onClick={() => setCurrent(index)}
+                          aria-label={`Soal ${index + 1}`}
+                          aria-current={index === current}
+                          className={`inline-flex h-8 items-center justify-center rounded-md border text-[12px] ${tone} ${
+                            index === current ? "ring-1 ring-foreground/40" : ""
+                          }`}
+                        >
+                          {index + 1}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 space-y-1 text-[11px] text-muted">
+                    <p className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded border border-primary/50 bg-primary/10" />
+                      Terjawab
+                    </p>
+                    <p className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded border border-border" />
+                      Belum dijawab
+                    </p>
+                    {grade && (
+                      <>
+                        <p className="flex items-center gap-1.5">
+                          <span className="h-2.5 w-2.5 rounded border border-success/60 bg-success/10" />
+                          Benar
                         </p>
-                      )}
-                    </div>
-                  );
-                })}
-                <div className="flex flex-wrap items-center gap-2">
+                        <p className="flex items-center gap-1.5">
+                          <span className="h-2.5 w-2.5 rounded border border-danger/60 bg-danger/10" />
+                          Salah
+                        </p>
+                      </>
+                    )}
+                  </div>
                   <button
                     type="button"
-                    disabled={
-                      busy === "grade" ||
-                      answers.filter((a) => a !== undefined).length === 0
-                    }
+                    disabled={busy === "grade" || answeredCount === 0}
                     onClick={onSubmitQuiz}
-                    className={primaryButton}
+                    className={`mt-3 w-full ${primaryButton}`}
                   >
                     <Check size={14} aria-hidden />
                     {busy === "grade" ? "Menilai..." : "Periksa jawaban"}
                   </button>
                   {grade && (
-                    <span className="text-[12px] text-muted">
+                    <p className="mt-2 text-center text-[12px] text-muted">
                       Skor {grade.score}% ({grade.correct}/{grade.total})
-                    </span>
+                    </p>
                   )}
-                </div>
+                </aside>
+
+                <section className="rounded-lg border border-border bg-surface p-4">
+                  <div className="flex items-center justify-between text-[12px] text-muted">
+                    <span>
+                      Soal {current + 1} dari {total}
+                    </span>
+                    {activeResult && (
+                      <span
+                        className={
+                          activeResult.correct ? "text-success" : "text-danger"
+                        }
+                      >
+                        {activeResult.correct ? "Benar" : "Salah"}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="mt-3 text-[15px] font-medium leading-relaxed">
+                    <MathText content={activeQuestion.question} />
+                  </p>
+
+                  <div className="mt-3 space-y-1.5">
+                    {activeQuestion.options.map((option, oIndex) => {
+                      const picked = answers[current] === oIndex;
+                      const correctOption =
+                        activeResult && activeResult.answer === oIndex;
+                      const wrongPick =
+                        activeResult && picked && !activeResult.correct;
+                      const letter = String.fromCharCode(65 + oIndex);
+                      return (
+                        <label
+                          key={oIndex}
+                          className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-[14px] ${
+                            correctOption
+                              ? "border-success/50 text-foreground"
+                              : wrongPick
+                                ? "border-danger/50 text-danger"
+                                : picked
+                                  ? "border-foreground/40 bg-surface-muted text-foreground"
+                                  : "border-border text-muted"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name={`q-${topic.id}-${current}`}
+                            checked={picked}
+                            onChange={() => onAnswer(current, oIndex)}
+                            className="mt-1 h-3.5 w-3.5 shrink-0 accent-foreground"
+                          />
+                          <span className="min-w-0">
+                            <span className="mr-1.5 font-medium text-muted">
+                              {letter}.
+                            </span>
+                            <MathText content={option} />
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+
+                  {activeResult && (
+                    <div className="mt-3 rounded-lg border border-border bg-surface-muted px-3 py-2 text-[13px]">
+                      <span className="font-medium">
+                        {activeResult.correct ? "Benar. " : "Salah. "}
+                      </span>
+                      <span className="text-muted">
+                        <MathText content={activeResult.explanation} />
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="mt-4 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      disabled={current === 0}
+                      onClick={() => setCurrent((value) => Math.max(0, value - 1))}
+                      className={chipClass}
+                    >
+                      <ArrowLeft size={12} aria-hidden /> Sebelumnya
+                    </button>
+                    <button
+                      type="button"
+                      disabled={current >= total - 1}
+                      onClick={() =>
+                        setCurrent((value) => Math.min(total - 1, value + 1))
+                      }
+                      className={chipClass}
+                    >
+                      Berikutnya <ArrowRight size={12} aria-hidden />
+                    </button>
+                  </div>
+                </section>
               </div>
             )}
           </section>
