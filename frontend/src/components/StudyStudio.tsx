@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { LoadingState } from "@/components/ui/LoadingState";
 import { Markdown, MathText } from "@/components/Markdown";
+import { Modal } from "@/components/ui/Modal";
 import {
   createStudyTopic,
   deleteStudyQuizHistory,
@@ -614,6 +615,7 @@ function TopicDetail({
   const [quizLevel, setQuizLevel] = useState<StudyQuizLevel>("campuran");
   const [current, setCurrent] = useState(0);
   const [shortOpen, setShortOpen] = useState<Set<number>>(new Set());
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editTitle, setEditTitle] = useState(topic.title);
   const [editSubject, setEditSubject] = useState(topic.subject);
@@ -1075,6 +1077,18 @@ function TopicDetail({
               )}
             </div>
 
+            {busy === "quiz" && (
+              <div className="mt-3" role="status" aria-live="polite">
+                <div className="flex items-center justify-between text-[12px] text-muted">
+                  <span>Menyusun soal...</span>
+                  <span>Mohon tunggu</span>
+                </div>
+                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-muted">
+                  <div className="animate-nav-progress h-full w-1/3 rounded-full bg-foreground/60" />
+                </div>
+              </div>
+            )}
+
             {topic.quiz.length === 0 ? (
               <p className="mt-2 text-[13px] text-muted">
                 Belum ada kuis. Kuis dibuat dari topik/materi; buat materi atau impor
@@ -1147,7 +1161,10 @@ function TopicDetail({
                   <button
                     type="button"
                     disabled={busy === "grade" || answeredCount === 0}
-                    onClick={onSubmitQuiz}
+                    onClick={() => {
+                      if (answeredCount < total) setConfirmSubmit(true);
+                      else onSubmitQuiz();
+                    }}
                     className={`mt-3 w-full ${primaryButton}`}
                   >
                     <Check size={14} aria-hidden />
@@ -1324,6 +1341,21 @@ function TopicDetail({
               </ul>
             )}
           </section>
+
+          <Modal
+            open={confirmSubmit}
+            tone="error"
+            title="Masih ada soal belum dijawab"
+            message={`${total - answeredCount} dari ${total} soal belum dijawab. Yakin ingin mengumpulkan sekarang?`}
+            confirmLabel="Ya, kumpulkan"
+            cancelLabel="Periksa lagi"
+            busy={busy === "grade"}
+            onClose={() => setConfirmSubmit(false)}
+            onConfirm={() => {
+              setConfirmSubmit(false);
+              onSubmitQuiz();
+            }}
+          />
         </>
       )}
 

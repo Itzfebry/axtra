@@ -8,6 +8,7 @@ non-destructive: stored content is only replaced after the model succeeds.
 from __future__ import annotations
 
 import json
+import random
 import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -170,6 +171,16 @@ def _loads_array(candidate: str) -> list[Any] | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, list) else None
+
+
+def _shuffle_options(options: list[str], answer: int) -> tuple[list[str], int]:
+    """Randomize option order while keeping the same correct option.
+
+    Models tend to put the correct answer at A/B; shuffling removes that bias.
+    """
+    order = list(range(len(options)))
+    random.shuffle(order)
+    return [options[i] for i in order], order.index(answer)
 
 
 def _out(row: dict[str, Any]) -> StudyTopicOut:
@@ -496,7 +507,7 @@ class StudyService:
         for item in parsed:
             if not isinstance(item, dict):
                 continue
-            options = [str(opt) for opt in item.get("options") or [] if str(opt).strip()]
+            options = [str(opt) for opt in item.get("options") or [] if str(opt).strip()][:4]
             if not item.get("question") or len(options) < 2:
                 continue
             try:
@@ -505,10 +516,11 @@ class StudyService:
                 answer = 0
             if not 0 <= answer < len(options):
                 answer = 0
+            options, answer = _shuffle_options(options, answer)
             questions.append(
                 {
                     "question": str(item["question"]).strip()[:1000],
-                    "options": options[:4],
+                    "options": options,
                     "answer": answer,
                     "explanation": str(item.get("explanation") or "").strip()[:1000],
                 }

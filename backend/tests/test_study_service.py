@@ -192,6 +192,19 @@ def test_quiz_history_config_and_delete() -> None:
     asyncio.run(run())
 
 
+def test_quiz_options_shuffled_but_answer_stays_correct() -> None:
+    from app.services.study_service import _shuffle_options
+
+    seen: set[int] = set()
+    for _ in range(200):
+        options = ["A", "B", "C", "D"]
+        shuffled, answer = _shuffle_options(options, 2)
+        assert shuffled[answer] == "C"
+        seen.add(answer)
+    # The correct index must spread across all positions, not stay at A/B.
+    assert seen == {0, 1, 2, 3}
+
+
 def test_quiz_distribution_and_level_setting() -> None:
     async def run() -> None:
         client = FakeClient()

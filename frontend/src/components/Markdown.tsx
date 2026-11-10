@@ -69,10 +69,36 @@ function CodeBlock({ children }: { children?: ReactNode }) {
  * understands: `\( ... \)` → inline `$ ... $`, `\[ ... \]` → display `$$ ... $$`.
  * Applied only outside fenced/inline code so real code is left untouched.
  */
-function normalizeMath(segment: string): string {
+function fixLatexTypos(segment: string): string {
   return segment
-    .replace(/\\\[([\s\S]*?)\\\]/g, (_match, body: string) => `\n\n$$\n${body}\n$$\n\n`)
-    .replace(/\\\(([\s\S]*?)\\\)/g, (_match, body: string) => `$${body}$`);
+    .replace(/\\+fraq(?![a-zA-Z])/g, "\\frac")
+    .replace(/\/(?:fraq|frac)(?![a-zA-Z])/g, "\\frac");
+}
+
+/**
+ * Wrap bare LaTeX commands (e.g. `\frac{1}{2}` without `$`) in inline math so
+ * they render instead of showing as raw text. Existing `$...$` is preserved.
+ */
+function wrapBareLatex(segment: string): string {
+  return segment
+    .split(/(\$\$[\s\S]*?\$\$|\$[^$\n]*\$)/g)
+    .map((part, index) =>
+      index % 2 === 1
+        ? part
+        : part.replace(/\\[a-zA-Z]+(?:\s*\{[^{}]*\})*/g, (match) => `$${match}$`),
+    )
+    .join("");
+}
+
+function normalizeMath(segment: string): string {
+  return wrapBareLatex(
+    fixLatexTypos(segment)
+      .replace(
+        /\\\[([\s\S]*?)\\\]/g,
+        (_match, body: string) => `\n\n$$\n${body}\n$$\n\n`,
+      )
+      .replace(/\\\(([\s\S]*?)\\\)/g, (_match, body: string) => `$${body}$`),
+  );
 }
 
 /**
