@@ -158,6 +158,7 @@ async def generate_quiz(
             llm,
             model,
             count=payload.count if payload else 5,
+            level=payload.level if payload else "campuran",
             persona=persona,
         )
     except KeyError as exc:

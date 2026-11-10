@@ -2330,13 +2330,16 @@ export async function importStudyMaterial(
   return data as StudyTopic;
 }
 
+export type StudyQuizLevel = "campuran" | "mudah" | "sedang" | "sulit";
+
 export async function generateStudyQuiz(
   id: string,
   count = 5,
+  level: StudyQuizLevel = "campuran",
 ): Promise<StudyTopic> {
   return apiFetch<StudyTopic>(`/study/${id}/quiz`, {
     method: "POST",
-    body: JSON.stringify({ count }),
+    body: JSON.stringify({ count, level }),
   });
 }
 

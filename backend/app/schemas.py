@@ -1186,6 +1186,7 @@ class StudyGenerateRequest(BaseModel):
 
 class StudyQuizRequest(BaseModel):
     count: int = Field(default=5, ge=3, le=20)
+    level: Literal["campuran", "mudah", "sedang", "sulit"] = "campuran"
 
 
 class StudyQuizQuestion(BaseModel):

@@ -33,6 +33,7 @@ import {
   scheduleStudyReview,
   updateStudyTopic,
   type StudyGradeResult,
+  type StudyQuizLevel,
   type StudyStatus,
   type StudyTopic,
 } from "@/lib/api";
@@ -53,12 +54,12 @@ function statusLabel(status: StudyStatus): string {
   return "Aktif";
 }
 
-const QUIZ_LEVELS = ["Mudah", "Sedang", "Sulit", "Sangat sulit", "Olimpiade"];
-
-/** Next quiz tier, climbing one step per finished attempt. */
-function difficultyLabel(attempts: number): string {
-  return QUIZ_LEVELS[Math.min(attempts, QUIZ_LEVELS.length - 1)];
-}
+const QUIZ_LEVEL_OPTIONS: { value: StudyQuizLevel; label: string }[] = [
+  { value: "campuran", label: "Campuran" },
+  { value: "mudah", label: "Mudah" },
+  { value: "sedang", label: "Sedang" },
+  { value: "sulit", label: "Sulit" },
+];
 
 function formatDate(iso: string | null): string {
   if (!iso) return "";
@@ -385,10 +386,10 @@ export function StudyStudio() {
                 "Materi belajar dibuat.",
               )
             }
-            onQuiz={(count) =>
+            onQuiz={(count, level) =>
               void run(
                 "quiz",
-                () => generateStudyQuiz(selected.id, count),
+                () => generateStudyQuiz(selected.id, count, level),
                 "Kuis dibuat. Jawab lalu periksa.",
               )
             }
@@ -548,7 +549,7 @@ function TopicDetail({
   onTarget: (value: string) => void;
   onImport: (file: File) => void;
   onGenerate: () => void;
-  onQuiz: (count: number) => void;
+  onQuiz: (count: number, level: StudyQuizLevel) => void;
   onSubmitQuiz: () => void;
   onPlan: () => void;
   onReview: (days: number) => void;
@@ -558,6 +559,7 @@ function TopicDetail({
   const currentDay = todayIndex(topic);
   const [tab, setTab] = useState<"materi" | "kuis" | "rencana">("materi");
   const [quizCount, setQuizCount] = useState(5);
+  const [quizLevel, setQuizLevel] = useState<StudyQuizLevel>("campuran");
   const [editOpen, setEditOpen] = useState(false);
   const [editTitle, setEditTitle] = useState(topic.title);
   const [editSubject, setEditSubject] = useState(topic.subject);
@@ -907,7 +909,7 @@ function TopicDetail({
               <button
                 type="button"
                 disabled={busy === "quiz"}
-                onClick={() => onQuiz(quizCount)}
+                onClick={() => onQuiz(quizCount, quizLevel)}
                 className={primaryButton}
               >
                 <Sparkles size={14} aria-hidden />
@@ -919,37 +921,52 @@ function TopicDetail({
               </button>
             </div>
 
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-              <span className="text-[12px] text-muted">Jumlah soal</span>
-              <div className="flex items-center gap-1.5">
-                {[5, 10, 15].map((value) => (
-                  <button
-                    key={value}
-                    type="button"
-                    onClick={() => setQuizCount(value)}
-                    aria-pressed={quizCount === value}
-                    className={`inline-flex h-7 items-center rounded-lg border px-2.5 text-[12px] ${
-                      quizCount === value
-                        ? "border-foreground/40 bg-surface-muted text-foreground"
-                        : "border-border text-muted hover:text-foreground"
-                    }`}
-                  >
-                    {value}
-                  </button>
-                ))}
+            <div className="mt-3 space-y-2">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="text-[12px] text-muted">Jumlah soal</span>
+                <div className="flex items-center gap-1.5">
+                  {[5, 10, 15].map((value) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setQuizCount(value)}
+                      aria-pressed={quizCount === value}
+                      className={`inline-flex h-7 items-center rounded-lg border px-2.5 text-[12px] ${
+                        quizCount === value
+                          ? "border-foreground/40 bg-surface-muted text-foreground"
+                          : "border-border text-muted hover:text-foreground"
+                      }`}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
               </div>
-              <span className="text-[12px] text-muted">
-                Tingkat:{" "}
-                <span className="text-foreground">
-                  {difficultyLabel(topic.quiz_history.length)}
-                </span>
-                {topic.quiz_history.length > 0 && (
-                  <span className="text-muted">
-                    {" "}
-                    (naik tiap percobaan)
-                  </span>
-                )}
-              </span>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <span className="text-[12px] text-muted">Tingkat</span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {QUIZ_LEVEL_OPTIONS.map(({ value, label }) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setQuizLevel(value)}
+                      aria-pressed={quizLevel === value}
+                      className={`inline-flex h-7 items-center rounded-lg border px-2.5 text-[12px] ${
+                        quizLevel === value
+                          ? "border-foreground/40 bg-surface-muted text-foreground"
+                          : "border-border text-muted hover:text-foreground"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {quizLevel === "campuran" && (
+                <p className="text-[12px] text-muted">
+                  Campuran: 30% mudah · 60% sedang · 10% sulit.
+                </p>
+              )}
             </div>
 
             {topic.quiz.length === 0 ? (

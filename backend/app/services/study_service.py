@@ -37,14 +37,13 @@ TABLE = "study_topics"
 _MAX_MATERIAL_CHARS = 60000
 _MAX_SOURCE_CHARS = 12000
 
-# Quiz difficulty ladder; index climbs with each finished attempt.
-_QUIZ_LEVELS: list[tuple[str, str]] = [
-    ("mudah", "definisi dasar, satu langkah"),
-    ("sedang", "penerapan dua langkah, variasi ringan"),
-    ("sulit", "analisis dan kombinasi konsep"),
-    ("sangat sulit", "soal HOTS, jebakan umum, multi-langkah"),
-    ("olimpiade", "penalaran tingkat lanjut dan menantang"),
-]
+# Quiz tiers and the default mixed distribution (easier -> harder).
+_QUIZ_TIERS: dict[str, str] = {
+    "mudah": "definisi dasar, satu langkah",
+    "sedang": "penerapan dua langkah, variasi ringan",
+    "sulit": "analisis dan kombinasi konsep, multi-langkah",
+}
+_QUIZ_MIX = {"mudah": 0.3, "sedang": 0.6, "sulit": 0.1}
 
 _STUDY_SYSTEM = """\
 Kamu adalah mentor belajar personal. Berdasarkan topik, target, dan materi \
@@ -163,6 +162,37 @@ def _out(row: dict[str, Any]) -> StudyTopicOut:
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
     )
+
+
+def _quiz_distribution(count: int, level: str) -> list[tuple[str, int]]:
+    """Split `count` questions across tiers for the chosen level.
+
+    "campuran" follows the default 30% mudah / 60% sedang / 10% sulit rule;
+    any other level puts every question on that tier.
+    """
+    if level != "campuran":
+        return [(level, count)]
+    easy = count * 3 // 10
+    hard = count // 10
+    medium = count - easy - hard
+    return [("mudah", easy), ("sedang", medium), ("sulit", hard)]
+
+
+def _quiz_instruction(count: int, level: str) -> str:
+    tiers = _quiz_distribution(count, level)
+    if level == "campuran":
+        parts = [
+            f"{n} soal {tier} ({_QUIZ_TIERS[tier]})"
+            for tier, n in tiers
+            if n > 0
+        ]
+        return (
+            f"Buat tepat {count} soal dengan komposisi: "
+            + ", ".join(parts)
+            + ". Urutkan dari mudah ke sulit."
+        )
+    desc = _QUIZ_TIERS.get(level, "")
+    return f"Buat tepat {count} soal, semuanya tingkat {level} ({desc})."
 
 
 def build_prompt(topic: StudyTopicOut, source_text: str = "", focus: str = "") -> str:
@@ -370,6 +400,7 @@ class StudyService:
         model: str,
         *,
         count: int = 5,
+        level: str = "campuran",
         persona: str = "",
     ) -> StudyTopicOut:
         topic = await self.get(user_id, topic_id)
@@ -377,9 +408,8 @@ class StudyService:
             raise KeyError("study_not_found")
         source = await self._source_text(user_id, topic_id)
         count = max(3, min(count, 20))
-        # Difficulty climbs with each finished attempt so retries get harder.
-        level = min(len(topic.quiz_history) + 1, len(_QUIZ_LEVELS))
-        label, hint = _QUIZ_LEVELS[level - 1]
+        if level not in ("campuran", *_QUIZ_TIERS):
+            level = "campuran"
         system = _QUIZ_SYSTEM + (f"\n\n{persona}" if persona else "")
         content, _ = await llm.complete(
             ChatRequest(
@@ -391,8 +421,7 @@ class StudyService:
                         + "\n\nMATERI:\n"
                         + (topic.material or "(materi belum dibuat)")
                         + f"\n\nJUMLAH SOAL: {count}"
-                        + f"\nTINGKAT KESULITAN: {label} ({hint}). "
-                        + "Buat seluruh soal pada tingkat ini.",
+                        + "\n" + _quiz_instruction(count, level),
                     ),
                 ],
                 model=model,
