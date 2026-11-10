@@ -141,10 +141,10 @@ def test_quiz_distribution_and_level_setting() -> None:
         )
         prompt = mixed.requests[0].messages[-1].content
         assert "JUMLAH SOAL: 10" in prompt
-        # Default mix: 30% mudah, 60% sedang, 10% sulit.
+        # Default mix: 30% mudah, 50% sedang, 20% sulit.
         assert "3 soal mudah" in prompt
-        assert "6 soal sedang" in prompt
-        assert "1 soal sulit" in prompt
+        assert "5 soal sedang" in prompt
+        assert "2 soal sulit" in prompt
 
         fixed = FakeLLM(reply)
         await service.generate_quiz(

@@ -964,7 +964,7 @@ function TopicDetail({
               </div>
               {quizLevel === "campuran" && (
                 <p className="text-[12px] text-muted">
-                  Campuran: 30% mudah · 60% sedang · 10% sulit.
+                  Campuran: 30% mudah · 50% sedang · 20% sulit.
                 </p>
               )}
             </div>

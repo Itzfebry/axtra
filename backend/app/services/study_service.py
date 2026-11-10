@@ -43,7 +43,7 @@ _QUIZ_TIERS: dict[str, str] = {
     "sedang": "penerapan dua langkah, variasi ringan",
     "sulit": "analisis dan kombinasi konsep, multi-langkah",
 }
-_QUIZ_MIX = {"mudah": 0.3, "sedang": 0.6, "sulit": 0.1}
+_QUIZ_MIX = {"mudah": 0.3, "sedang": 0.5, "sulit": 0.2}
 
 _STUDY_SYSTEM = """\
 Kamu adalah mentor belajar personal. Berdasarkan topik, target, dan materi \
@@ -167,13 +167,13 @@ def _out(row: dict[str, Any]) -> StudyTopicOut:
 def _quiz_distribution(count: int, level: str) -> list[tuple[str, int]]:
     """Split `count` questions across tiers for the chosen level.
 
-    "campuran" follows the default 30% mudah / 60% sedang / 10% sulit rule;
+    "campuran" follows the default 30% mudah / 50% sedang / 20% sulit rule;
     any other level puts every question on that tier.
     """
     if level != "campuran":
         return [(level, count)]
-    easy = count * 3 // 10
-    hard = count // 10
+    easy = int(count * _QUIZ_MIX["mudah"])
+    hard = int(count * _QUIZ_MIX["sulit"])
     medium = count - easy - hard
     return [("mudah", easy), ("sedang", medium), ("sulit", hard)]
 
