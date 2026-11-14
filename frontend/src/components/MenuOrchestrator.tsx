@@ -16,6 +16,7 @@ import {
 } from "@/lib/api";
 import { focusMenu, queuePrompt } from "@/lib/orchestratorBridge";
 import { CHAT_MODE_IDS } from "@/lib/chatModes";
+import { applyTheme } from "@/lib/menuConfig";
 
 type ChatLine = { role: "user" | "assistant"; content: string };
 
@@ -39,18 +40,6 @@ function chatModeFromHref(href: string): string | null {
   return CHAT_MODE_IDS.includes(segment as (typeof CHAT_MODE_IDS)[number])
     ? segment
     : null;
-}
-
-function applyTheme(theme: "light" | "dark") {
-  if (typeof document === "undefined") return;
-  document.documentElement.dataset.theme = theme;
-  try {
-    window.localStorage.setItem("axtra-theme", theme);
-  } catch {
-    // Storage may be unavailable; theme still applies for this session.
-  }
-  // Let the theme toggle re-read the new value without a reload.
-  window.dispatchEvent(new Event("axtra:theme-changed"));
 }
 
 /**

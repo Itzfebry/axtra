@@ -170,6 +170,14 @@ class Settings(BaseSettings):
     automation_quiet_start: int = 22  # WIB inclusive
     automation_quiet_end: int = 7  # WIB exclusive
 
+    # Headless automation. When ``api_token`` is set, a request carrying
+    # ``X-API-Key: <token>`` (or ``Authorization: Bearer <token>``) authenticates
+    # as the owner, so scripts and Hermes skip the browser login dance.
+    api_token: str = ""
+    # Outbound bridge for POST /api/agent/hooks/hermes (a Hermes webhook route).
+    hermes_webhook_url: str = ""
+    hermes_webhook_token: str = ""
+
     # Web Push (PWA notifications). Generate a VAPID keypair with py_vapid;
     # ``vapid_private_key`` holds the PEM (newlines may be escaped as ``\n``).
     # ``vapid_subject`` is a contact URI (``mailto:`` or an https URL).

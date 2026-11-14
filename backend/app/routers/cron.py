@@ -284,6 +284,16 @@ async def minutely(
         logger.warning("Schedule dispatch failed: %s", exc)
         notes.append(f"schedules: {exc}")
 
+    try:
+        from app.services.agent_job_service import run_jobs
+
+        ran = await run_jobs(client, settings, limit=3)
+        if ran:
+            notes.append(f"agent jobs: {len(ran)}")
+    except Exception as exc:  # noqa: BLE001 - a bad job must not stop the tick
+        logger.warning("Agent job run failed: %s", exc)
+        notes.append(f"agent jobs: {exc}")
+
     if settings.telegram_bot_token:
         try:
             sent, failed = await deliver_due(

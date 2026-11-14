@@ -1,5 +1,7 @@
 /** Per-browser menu configuration owned by the homepage orchestrator. */
 
+import { apiFetch } from "@/lib/api";
+
 export type MenuConfig = {
   /** Preferred feature id order. Empty means the built-in order. */
   order: string[];
@@ -8,6 +10,9 @@ export type MenuConfig = {
   /** Feature id -> custom label. */
   labels: Record<string, string>;
 };
+
+/** Menu config plus the theme Axtra/headless commands may have set. */
+export type OrchestratorState = MenuConfig & { theme: "light" | "dark" | null };
 
 export const DEFAULT_MENU_CONFIG: MenuConfig = {
   order: [],
@@ -54,7 +59,40 @@ export function saveMenuConfig(config: MenuConfig): void {
   } catch {
     // Storage may be unavailable (private mode); config is just not persisted.
   }
+  // Server copy: what makes headless menu changes (API token / Telegram) land
+  // in the sidebar on every device. Failures fall back to localStorage.
+  void apiFetch<unknown>("/agent/state", {
+    method: "PUT",
+    body: JSON.stringify(config),
+  }).catch(() => undefined);
   window.dispatchEvent(new Event(MENU_CONFIG_CHANGED));
+}
+
+/** Read the server-side menu/theme state written by the orchestrator or headless calls. */
+export async function loadOrchestratorState(): Promise<OrchestratorState | null> {
+  try {
+    const state = await apiFetch<Partial<OrchestratorState>>("/agent/state");
+    return {
+      order: isStringArray(state.order) ? state.order : [],
+      hidden: isStringArray(state.hidden) ? state.hidden : [],
+      labels: state.labels && typeof state.labels === "object" ? state.labels : {},
+      theme: state.theme === "dark" || state.theme === "light" ? state.theme : null,
+    };
+  } catch {
+    return null; // offline or an older backend: localStorage stays the source
+  }
+}
+
+/** Apply a theme and let the toggle re-read it without a reload. */
+export function applyTheme(theme: "light" | "dark"): void {
+  if (typeof document === "undefined") return;
+  document.documentElement.dataset.theme = theme;
+  try {
+    window.localStorage.setItem("axtra-theme", theme);
+  } catch {
+    // Storage may be unavailable; theme still applies for this session.
+  }
+  window.dispatchEvent(new Event("axtra:theme-changed"));
 }
 
 export function applyMenuConfig<T extends ConfigurableFeature>(

@@ -15,6 +15,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.config import get_settings
 from app.memory_service_provider import build_llm_provider
 from app.routers import (
+    agent,
     auth,
     chat,
     chat_settings,
@@ -124,6 +125,7 @@ def create_app() -> FastAPI:
     app.include_router(research.router)
     app.include_router(recommendations.router)
     app.include_router(orchestrator.router)
+    app.include_router(agent.router)
     app.include_router(usage.router)
     app.include_router(providers.router)
     app.include_router(images.router)

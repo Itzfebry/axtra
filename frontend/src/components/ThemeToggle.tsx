@@ -3,6 +3,8 @@
 import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { apiFetch } from "@/lib/api";
+
 type Theme = "dark" | "light";
 
 function currentTheme(): Theme {
@@ -41,6 +43,12 @@ export function ThemeToggle({ className = "" }: { className?: string }) {
     } catch {
       // Storage may be unavailable; theme still applies for this session.
     }
+    // Persist server-side too: the orchestrator state is the source of truth on
+    // load, so a local-only toggle would revert on the next visit.
+    void apiFetch<unknown>("/agent/state", {
+      method: "PUT",
+      body: JSON.stringify({ theme: next }),
+    }).catch(() => undefined);
     setTheme(next);
   }
 

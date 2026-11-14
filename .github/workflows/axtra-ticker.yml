@@ -1,0 +1,31 @@
+# Axtra ticker — Vercel's own cron runs /api/cron/tick once a day (Hobby plan),
+# which is too slow for reminders and the agent job queue. This workflow drives
+# the minutely endpoint instead. The scheduled-notification engine is
+# idempotent (automation_runs), so a duplicate tick is harmless.
+#
+# Repo secrets required:
+#   AXTRA_API_URL  e.g. https://axtra1.vercel.app
+#   CRON_SECRET    the same value as the backend CRON_SECRET env var
+name: axtra-ticker
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: axtra-ticker
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Minutely (reminders + agent job queue)
+        run: |
+          curl -fsS --max-time 60 -X POST "${{ secrets.AXTRA_API_URL }}/api/cron/minutely" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+      - name: Daily report (hourly check keeps Vercel's schedule as a fallback)
+        run: |
+          curl -fsS --max-time 60 -X POST "${{ secrets.AXTRA_API_URL }}/api/cron/tick" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"

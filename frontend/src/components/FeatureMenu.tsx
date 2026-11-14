@@ -7,7 +7,9 @@ import type { OrchestratorAction, OrchestratorMenuEntry } from "@/lib/api";
 import { FEATURES } from "@/lib/features";
 import {
   DEFAULT_MENU_CONFIG,
+  applyTheme,
   loadMenuConfig,
+  loadOrchestratorState,
   saveMenuConfig,
   type MenuConfig,
 } from "@/lib/menuConfig";
@@ -16,9 +18,24 @@ export function FeatureMenu() {
   const [config, setConfig] = useState<MenuConfig>(DEFAULT_MENU_CONFIG);
   const [configLoaded, setConfigLoaded] = useState(false);
 
+  // The server state wins when it exists: headless commands and Telegram wrote
+  // it, so the sidebar must not overwrite it with this browser's localStorage.
   useEffect(() => {
-    setConfig(loadMenuConfig());
-    setConfigLoaded(true);
+    let cancelled = false;
+    void (async () => {
+      const state = await loadOrchestratorState();
+      if (cancelled) return;
+      if (state) {
+        setConfig({ order: state.order, hidden: state.hidden, labels: state.labels });
+        if (state.theme) applyTheme(state.theme);
+      } else {
+        setConfig(loadMenuConfig());
+      }
+      setConfigLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

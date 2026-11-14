@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections import deque
 from dataclasses import dataclass
+import secrets
 
 from fastapi import Depends, HTTPException, Request, status
 from supabase import AsyncClient
@@ -26,15 +27,33 @@ async def get_current_user(
     request: Request,
     settings: Settings = Depends(get_settings),
 ) -> CurrentUser:
-    """Validate the signed session cookie and return the fixed owner context."""
+    """Return the fixed owner context for a valid cookie *or* API token.
+
+    The header path is what makes Axtra drivable headlessly: cron ticks, the
+    Telegram bridge, and Hermes send ``X-API-Key`` instead of logging in.
+    """
     token = request.cookies.get(COOKIE_NAME, "")
     if not verify_session_token(token, settings.session_secret):
+        token = _api_token(request, settings)
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Sesi tidak valid. Silakan login ulang.",
         )
     client = await get_owner_client()
     return CurrentUser(id=settings.owner_user_id, email=None, token=token, client=client)
+
+
+def _api_token(request: Request, settings: Settings) -> str:
+    """The configured automation token, or "" when absent/wrong."""
+    provided = request.headers.get("x-api-key", "").strip()
+    if not provided:
+        authorization = request.headers.get("authorization", "")
+        if authorization.lower().startswith("bearer "):
+            provided = authorization[7:].strip()
+    if provided and settings.api_token and secrets.compare_digest(provided, settings.api_token):
+        return provided
+    return ""
 
 
 # ---------------------------------------------------------------------------
