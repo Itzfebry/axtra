@@ -4,8 +4,9 @@
 # idempotent (automation_runs), so a duplicate tick is harmless.
 #
 # Repo secrets required:
-#   AXTRA_API_URL  e.g. https://axtra1.vercel.app
-#   CRON_SECRET    the same value as the backend CRON_SECRET env var
+#   AXTRA_API_URL    e.g. https://axtra1.vercel.app
+#   AXTRA_API_TOKEN  the backend's API_TOKEN (X-API-Key). /api/cron/* accept it
+#                    as an alternative to CRON_SECRET, which stays server-side.
 name: axtra-ticker
 
 on:
@@ -24,8 +25,8 @@ jobs:
       - name: Minutely (reminders + agent job queue)
         run: |
           curl -fsS --max-time 60 -X POST "${{ secrets.AXTRA_API_URL }}/api/cron/minutely" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+            -H "X-API-Key: ${{ secrets.AXTRA_API_TOKEN }}"
       - name: Daily report (hourly check keeps Vercel's schedule as a fallback)
         run: |
           curl -fsS --max-time 60 -X POST "${{ secrets.AXTRA_API_URL }}/api/cron/tick" \
-            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}"
+            -H "X-API-Key: ${{ secrets.AXTRA_API_TOKEN }}"

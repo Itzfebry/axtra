@@ -37,8 +37,14 @@ def _authorize(request: Request, settings: Settings) -> None:
             detail="CRON_SECRET belum diatur.",
         )
     provided = request.headers.get("authorization", "")
-    if not secrets.compare_digest(provided, f"Bearer {settings.cron_secret}"):
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Tidak diizinkan.")
+    if secrets.compare_digest(provided, f"Bearer {settings.cron_secret}"):
+        return
+    # The ticker may carry the automation token instead, so one secret covers
+    # scripts, Hermes, and GitHub Actions without exposing CRON_SECRET.
+    api_key = request.headers.get("x-api-key", "").strip()
+    if api_key and settings.api_token and secrets.compare_digest(api_key, settings.api_token):
+        return
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Tidak diizinkan.")
 
 
 async def _claim_run(

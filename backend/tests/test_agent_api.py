@@ -166,3 +166,23 @@ async def test_run_jobs_marks_failure_when_llm_missing(client: TestClient) -> No
     finished = await run_jobs(fake, settings, limit=1)
     assert len(finished) == 1
     assert finished[0]["status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# Cron auth: the ticker may carry the automation token instead of CRON_SECRET
+# ---------------------------------------------------------------------------
+def test_cron_authorize_accepts_cron_secret_and_api_token() -> None:
+    from types import SimpleNamespace
+
+    from app.routers.cron import _authorize
+
+    settings = _settings()
+    settings.cron_secret = "cron_secret_value"
+
+    def request(headers: dict[str, str]) -> SimpleNamespace:
+        return SimpleNamespace(headers=headers)
+
+    _authorize(request({"authorization": "Bearer cron_secret_value"}), settings)
+    _authorize(request({"x-api-key": "tok_123"}), settings)
+    with pytest.raises(Exception):
+        _authorize(request({"x-api-key": "nope"}), settings)

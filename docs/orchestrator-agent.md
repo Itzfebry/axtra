@@ -66,11 +66,21 @@ retries).
 `/api/cron/minutely` fires reminders, drains the Telegram outbox, and runs up to
 three queued agent jobs. Vercel's own cron (`vercel.json`) only runs
 `/api/cron/tick` once a day, so `.github/workflows/axtra-ticker.yml` calls the
-minutely endpoint every 5 minutes. Repo secrets: `AXTRA_API_URL` and
-`CRON_SECRET` (same value as the backend env var).
+minutely endpoint every 5 minutes.
+
+Repo secrets: `AXTRA_API_URL` (`https://axtra1.vercel.app`) and
+`AXTRA_API_TOKEN` (the backend's `API_TOKEN`). Both `/api/cron/*` endpoints
+accept `X-API-Key: <API_TOKEN>` as an alternative to `Bearer <CRON_SECRET>`, so
+the ticker never needs the server-only `CRON_SECRET`:
+
+```bash
+gh secret set AXTRA_API_URL --repo Itzfebry/axtra --body "https://axtra1.vercel.app"
+gh secret set AXTRA_API_TOKEN --repo Itzfebry/axtra --body "<API_TOKEN>"
+gh workflow run axtra-ticker --repo Itzfebry/axtra
+```
 
 Hermes can drive the ticker instead, if a GitHub schedule is not wanted — a
-cron job that curls the same URL with the same `Bearer` header.
+cron job that POSTs the same URL with the same `X-API-Key` header.
 
 ## One bot, not two
 
