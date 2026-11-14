@@ -33,6 +33,14 @@ router = APIRouter(prefix="/api/agent", tags=["agent"])
 
 STATE_TABLE = "orchestrator_state"
 _STATE_FIELDS = ("order", "hidden", "labels", "theme", "updated_at")
+# Handled by _apply_menu_actions, not by the per-action loop above it.
+_MENU_ACTION_TYPES = (
+    "menu_order",
+    "menu_visibility",
+    "menu_rename",
+    "reset_menu",
+    "set_theme",
+)
 
 
 class MenuState(BaseModel):
@@ -183,6 +191,9 @@ async def apply_actions(
             )
             result.executed.append(f"queue_chat:{job['id']}")
             result.queued_job_ids.append(str(job["id"]))
+        elif action.type in _MENU_ACTION_TYPES:
+            # Applied by _apply_menu_actions below, so not a skip.
+            continue
         else:
             result.skipped.append(f"{action.type}:tidak dieksekusi server")
 

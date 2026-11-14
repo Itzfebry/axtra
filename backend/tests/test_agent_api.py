@@ -186,3 +186,15 @@ def test_cron_authorize_accepts_cron_secret_and_api_token() -> None:
     _authorize(request({"x-api-key": "tok_123"}), settings)
     with pytest.raises(Exception):
         _authorize(request({"x-api-key": "nope"}), settings)
+
+
+def test_apply_menu_action_is_not_reported_as_skipped(client: TestClient) -> None:
+    response = client.post(
+        "/api/agent/apply",
+        headers={"X-API-Key": "tok_123"},
+        json={"actions": [{"type": "menu_rename", "labels": {"chat": "Chat Axtra"}}]},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["skipped"] == []
+    assert body["state"]["labels"] == {"chat": "Chat Axtra"}
